@@ -114,8 +114,6 @@ class Cursor {
     return had_line_splice;
   }
 
-  DecodedChar ConsumeUTF8() noexcept;
-
   const char* begin_;
   const char* end_;
   const char* current_;
