@@ -463,6 +463,34 @@ TEST(BufferedLexerTest, StringLiteralInvalidUtf8) {
   ExpectToken(lexer.NextToken(), {TokenKind::kEOF, "", 3, false, false, false});
 }
 
+TEST(BufferedLexerTest, TruncatedFourByteUtf8ProducesBytewiseUnknownTokens) {
+  const std::string input =
+      MakeBytes({static_cast<char>(0xF0), static_cast<char>(0x90),
+                 static_cast<char>(0x8D)});
+  auto lexer = MakeLexer(input);
+
+  ExpectToken(lexer.NextToken(),
+              {TokenKind::kUnknown, input.substr(0, 1), 0, true, false, false});
+  ExpectToken(lexer.NextToken(), {TokenKind::kUnknown, input.substr(1, 1), 1,
+                                  false, false, false});
+  ExpectToken(lexer.NextToken(), {TokenKind::kUnknown, input.substr(2, 1), 2,
+                                  false, false, false});
+  ExpectToken(lexer.NextToken(), {TokenKind::kEOF, "", 3, false, false, false});
+}
+
+TEST(BufferedLexerTest,
+     OverlongTwoByteUtf8AcrossLineSpliceProducesBytewiseUnknownTokens) {
+  const std::string input =
+      MakeBytes({static_cast<char>(0xC0), '\\', '\n', static_cast<char>(0x80)});
+  auto lexer = MakeLexer(input);
+
+  ExpectToken(lexer.NextToken(),
+              {TokenKind::kUnknown, "\xc0", 0, true, false, false});
+  ExpectToken(lexer.NextToken(),
+              {TokenKind::kUnknown, "\\\n\x80", 1, false, false, true});
+  ExpectToken(lexer.NextToken(), {TokenKind::kEOF, "", 4, false, false, false});
+}
+
 TEST(BufferedLexerTest, EmptyCharLiteral) {
   auto lexer = MakeLexer("''");
   ExpectToken(lexer.NextToken(),
@@ -683,12 +711,49 @@ TEST(BufferedLexerTest, NullBytesBetweenTokens) {
   ExpectToken(lexer.NextToken(),
               {TokenKind::kIdentifier, "int", 0, true, false, false});
   ExpectToken(lexer.NextToken(),
-              {TokenKind::kIdentifier, "x", 4, false, false, false});
+              {TokenKind::kIdentifier, "x", 4, false, true, false});
   ExpectToken(lexer.NextToken(),
-              {TokenKind::kEqual, "=", 6, false, false, false});
+              {TokenKind::kEqual, "=", 6, false, true, false});
   ExpectToken(lexer.NextToken(),
-              {TokenKind::kNumericConstant, "1", 8, false, false, false});
+              {TokenKind::kNumericConstant, "1", 8, false, true, false});
   ExpectToken(lexer.NextToken(), {TokenKind::kEOF, "", 9, false, false, false});
+}
+
+// Null bytes should set LeadingSpace (matching Clang behavior where null
+// bytes are treated as whitespace). Currently our lexer skips null bytes
+// without updating has_leading_space_, so this test documents the gap.
+TEST(BufferedLexerTest, NullBytesSetLeadingSpace) {
+  // Leading null byte before an identifier: Clang sets LeadingSpace.
+  {
+    auto lexer = MakeLexer(MakeBytes({'\0', 'i', 'n', 't'}));
+    ExpectToken(lexer.NextToken(),
+                {TokenKind::kIdentifier, "int", 1, true, true, false});
+    ExpectToken(lexer.NextToken(),
+                {TokenKind::kEOF, "", 4, false, false, false});
+  }
+
+  // Null byte between two identifiers: Clang sets LeadingSpace on the second.
+  {
+    auto lexer = MakeLexer(MakeBytes({'i', 'n', 't', '\0', 'x'}));
+    ExpectToken(lexer.NextToken(),
+                {TokenKind::kIdentifier, "int", 0, true, false, false});
+    ExpectToken(lexer.NextToken(),
+                {TokenKind::kIdentifier, "x", 4, false, true, false});
+    ExpectToken(lexer.NextToken(),
+                {TokenKind::kEOF, "", 5, false, false, false});
+  }
+
+  // Multiple consecutive null bytes: Clang treats them as a single
+  // whitespace run (still LeadingSpace).
+  {
+    auto lexer = MakeLexer(MakeBytes({'i', 'n', 't', '\0', '\0', 'x'}));
+    ExpectToken(lexer.NextToken(),
+                {TokenKind::kIdentifier, "int", 0, true, false, false});
+    ExpectToken(lexer.NextToken(),
+                {TokenKind::kIdentifier, "x", 5, false, true, false});
+    ExpectToken(lexer.NextToken(),
+                {TokenKind::kEOF, "", 6, false, false, false});
+  }
 }
 
 }  // namespace

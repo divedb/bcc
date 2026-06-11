@@ -26,19 +26,21 @@ class Cursor {
         end_(buffer.data() + buffer.size()),
         current_(buffer.data()) {};
 
-  /// \brief Decodes and returns the next Unicode code point.
+  /// \brief Decodes the next Unicode code point and advances the cursor.
   ///
-  /// Advances the cursor past the decoded UTF-8 sequence. Before decoding,
-  /// any backslash-newline line splices are removed transparently.
+  /// Always advances: by the byte length of the encoded character on success,
+  /// by exactly one byte on invalid UTF-8. Does not advance on EOF.
   ///
-  /// If one or more line splices are skipped, HadLineSplice() becomes true and
-  /// remains true until ResetLineSpliceFlag() is called.
+  /// Any backslash-newline line splices are removed transparently before each
+  /// byte is consumed. If one or more splices are skipped, HadLineSplice()
+  /// becomes true and remains true until ResetLineSpliceFlag() is called.
   ///
-  /// Returns DecodedChar::kEOF when the end of the input is reached, or
-  /// DecodedChar::kInvalid if the input contains an invalid UTF-8 sequence.
+  /// On invalid UTF-8 the cursor is placed exactly one byte past the lead
+  /// byte of the rejected sequence, so the caller never needs a manual
+  /// Advance() call to make progress.
   ///
   /// \return The decoded Unicode code point, kEOF, or kInvalid.
-  DecodedChar DecodeUTF8() noexcept;
+  DecodedChar Next() noexcept;
 
   void Advance(std::size_t n = 1) noexcept {
     assert(n <= Remaining());
@@ -54,7 +56,7 @@ class Cursor {
 
   /// \brief Reports whether a line splice has been skipped.
   ///
-  /// \return true if any call to DecodeUTF8() since the last
+  /// \return true if any call to TryDecodeUTF8() since the last
   ///         ResetLineSpliceFlag() removed one or more backslash-newline
   ///         sequences. The flag remains set until explicitly cleared.
   bool HadLineSplice() const noexcept { return had_line_splice_; }
@@ -111,6 +113,8 @@ class Cursor {
 
     return had_line_splice;
   }
+
+  DecodedChar ConsumeUTF8() noexcept;
 
   const char* begin_;
   const char* end_;

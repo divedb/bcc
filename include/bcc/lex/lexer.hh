@@ -46,7 +46,6 @@ class BufferedLexer : public LexerBase {
  private:
   void InitializeTokenFlags() noexcept;
   void UpdateLexerState(TokenKind kind) noexcept;
-  void SkipIgnoredNullBytes() noexcept;
 
   Token LexToken();
   Token LexNumericConstant(Cursor cursor);

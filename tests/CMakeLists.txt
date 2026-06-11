@@ -12,6 +12,7 @@ FetchContent_MakeAvailable(googletest)
 enable_testing()
 
 add_executable(bcc_lex_test
+  lex/cursor_test.cc
   lex/identifier_util_test.cc
   lex/lexer_test.cc
 )

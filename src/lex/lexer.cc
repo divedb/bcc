@@ -1,8 +1,6 @@
 #include "bcc/lex/lexer.hh"
 
 #include <cassert>
-#include <cctype>
-#include <cstring>
 
 #include "bcc/common/string_util.hh"
 #include "bcc/lex/identifier_util.hh"
@@ -11,9 +9,6 @@ namespace bcc {
 
 namespace {
 
-// Character classification helpers for preprocessing-token lexing.
-// Keep these narrowly scoped so the tokenization rules stay readable at call
-// sites without duplicating byte-level checks throughout the lexer.
 constexpr bool IsWhitespace(uint32_t ch) noexcept {
   return ch == ' ' || ch == '\t' || ch == '\v' || ch == '\f';
 }
@@ -90,7 +85,7 @@ std::optional<LiteralPrefix> TryClassifyLiteralPrefix(Cursor cursor,
   if (lead == '"') return LiteralPrefix{TokenKind::kStringLiteral, '"', cursor};
 
   // Single-character encoding prefixes (U, L, u): peek one character.
-  DecodedChar ch1 = cursor.DecodeUTF8();
+  DecodedChar ch1 = cursor.Next();
 
   if (lead == 'U') {
     if (ch1.codepoint == '\'') {
@@ -129,7 +124,7 @@ std::optional<LiteralPrefix> TryClassifyLiteralPrefix(Cursor cursor,
 
   // u8 prefix: peek one more character for the delimiter.
   // u8' is not a valid literal prefix in C11/C17; u8 is lexed as an identifier.
-  DecodedChar ch2 = cursor.DecodeUTF8();
+  DecodedChar ch2 = cursor.Next();
 
   if (ch2.codepoint == '"') {
     return LiteralPrefix{TokenKind::kUtf8StringLiteral, '"', cursor};
@@ -150,7 +145,7 @@ constexpr bool IsForbiddenUCNCodepoint(uint32_t cp) noexcept {
 // UCNs have the form \uXXXX or \UXXXXXXXX where X is a hexadecimal digit.
 DecodedChar DecodeUCN(Cursor& cursor) noexcept {
   Cursor saved = cursor;
-  DecodedChar ch = cursor.DecodeUTF8();
+  DecodedChar ch = cursor.Next();
 
   if (!ch.IsValid() || (ch.codepoint != 'u' && ch.codepoint != 'U')) {
     cursor = saved;
@@ -162,7 +157,7 @@ DecodedChar DecodeUCN(Cursor& cursor) noexcept {
   uint32_t codepoint = 0;
 
   for (int i = 0; i < num_digits; ++i) {
-    ch = cursor.DecodeUTF8();
+    ch = cursor.Next();
 
     if (!ch.IsValid() || !IsHexDigit(ch.codepoint)) {
       cursor = saved;
@@ -179,6 +174,14 @@ DecodedChar DecodeUCN(Cursor& cursor) noexcept {
 }  // namespace
 
 Token BufferedLexer::NextToken() {
+  while (!cursor_.AtEnd() && *cursor_.Current() == '\0') {
+    // Clang ignores raw NUL bytes in the source, but they still behave like
+    // separating whitespace for the following token's LeadingSpace state.
+    // We currently skip them here without updating lexer spacing state.
+    has_leading_space_ = true;
+    cursor_.Advance();
+  }
+
   InitializeTokenFlags();
   Token token = LexToken();
   UpdateLexerState(token.GetKind());
@@ -212,10 +215,6 @@ void BufferedLexer::UpdateLexerState(TokenKind kind) noexcept {
   }
 }
 
-void BufferedLexer::SkipIgnoredNullBytes() noexcept {
-  while (!cursor_.AtEnd() && *cursor_.Current() == '\0') cursor_.Advance();
-}
-
 // 6.4.8 Preprocessing numbers
 // Syntax
 // pp-number:
@@ -233,7 +232,7 @@ void BufferedLexer::SkipIgnoredNullBytes() noexcept {
 Token BufferedLexer::LexNumericConstant(Cursor cursor) {
   while (!cursor.AtEnd()) {
     Cursor candidate = cursor;
-    DecodedChar ch = candidate.DecodeUTF8();
+    DecodedChar ch = candidate.Next();
 
     if (!ch.IsValid()) break;
 
@@ -241,7 +240,7 @@ Token BufferedLexer::LexNumericConstant(Cursor cursor) {
 
     if (IsExponentIntroducer(cp)) {
       Cursor sign_cursor = candidate;
-      DecodedChar sign = sign_cursor.DecodeUTF8();
+      DecodedChar sign = sign_cursor.Next();
 
       if (sign.IsValid() && IsSign(sign.codepoint)) {
         cursor = sign_cursor;
@@ -268,7 +267,7 @@ Token BufferedLexer::LexPPNumberOrPeriod(Cursor cursor, uint32_t lead) {
          "leads");
 
   Cursor saved_cursor = cursor;
-  DecodedChar ch = cursor.DecodeUTF8();
+  DecodedChar ch = cursor.Next();
 
   if (ch.IsValid() && IsDigit(ch.codepoint)) {
     return LexNumericConstant(cursor);
@@ -341,9 +340,9 @@ Token BufferedLexer::LexPunctuator(Cursor cursor, uint32_t lead) {
     bool matches = true;
 
     for (size_t i = 1; i < punc.spelling.size(); i++) {
-      DecodedChar ch = candidate.DecodeUTF8();
+      DecodedChar ch = candidate.Next();
 
-      if (ch.IsEOF() || ch.codepoint != punc.spelling[i]) {
+      if (!ch.IsValid() || ch.codepoint != punc.spelling[i]) {
         matches = false;
         break;
       }
@@ -370,9 +369,14 @@ Token BufferedLexer::LexPunctuator(Cursor cursor, uint32_t lead) {
 Token BufferedLexer::LexIdentifier(Cursor cursor) {
   while (!cursor.AtEnd()) {
     Cursor saved_cursor = cursor;
-    DecodedChar ch = cursor.DecodeUTF8();
+    DecodedChar ch = cursor.Next();
 
-    if (!ch.IsValid()) break;
+    // Invalid UTF-8 ends the identifier; restore so the bad byte is not
+    // included in the lexeme and is re-lexed as the next token.
+    if (!ch.IsValid()) {
+      cursor = saved_cursor;
+      break;
+    }
 
     if (ch.codepoint == '\\') {
       ch = DecodeUCN(cursor);
@@ -402,15 +406,14 @@ Token BufferedLexer::LexDelimitedLiteral(Cursor cursor, TokenKind kind,
                                          char delimiter) {
   while (!cursor.AtEnd()) {
     Cursor saved = cursor;
-    DecodedChar ch = cursor.DecodeUTF8();
+    DecodedChar ch = cursor.Next();
 
-    if (ch.IsInvalidUTF8()) {
-      cursor.Advance();
-      continue;
-    }
+    // Invalid UTF-8 is kept as literal text; Next() already stepped past the
+    // bad byte.
+    if (ch.IsInvalidUTF8()) continue;
 
     if (ch.codepoint == '\\') {
-      if (!cursor.AtEnd()) cursor.DecodeUTF8();
+      if (!cursor.AtEnd()) cursor.Next();
       continue;
     }
 
@@ -439,13 +442,7 @@ Token BufferedLexer::LexMultiLineComment(Cursor cursor) {
   bool seen_asterisk = false;
 
   while (!cursor.AtEnd()) {
-    DecodedChar ch = cursor.DecodeUTF8();
-
-    // Invalid UTF-8 sequences are treated as part of the comment text.
-    if (ch.IsInvalidUTF8()) {
-      cursor.Advance();
-      continue;
-    }
+    DecodedChar ch = cursor.Next();
 
     if (ch.IsEOF()) break;
 
@@ -465,13 +462,11 @@ Token BufferedLexer::LexMultiLineComment(Cursor cursor) {
 Token BufferedLexer::LexSingleLineComment(Cursor cursor) {
   while (!cursor.AtEnd()) {
     Cursor saved_cursor = cursor;
-    DecodedChar ch = cursor.DecodeUTF8();
+    DecodedChar ch = cursor.Next();
 
-    // Invalid UTF-8 sequences are treated as part of the comment text.
-    if (ch.IsInvalidUTF8()) {
-      cursor.Advance();
-      continue;
-    }
+    // Invalid UTF-8 is treated as comment text; Next() already stepped past
+    // the bad byte.
+    if (ch.IsInvalidUTF8()) continue;
 
     if (ch.IsEOF()) break;
 
@@ -487,7 +482,7 @@ Token BufferedLexer::LexSingleLineComment(Cursor cursor) {
 //               and is a '/'.
 Token BufferedLexer::LexCommentOrSlash(Cursor cursor) {
   Cursor saved_cursor = cursor;
-  DecodedChar ch = cursor.DecodeUTF8();
+  DecodedChar ch = cursor.Next();
 
   // If the next character is not '/' or '*', this is not a comment. Delegate
   // to LexPunctuator to check for multi-character punctuators such as "/=".
@@ -495,14 +490,7 @@ Token BufferedLexer::LexCommentOrSlash(Cursor cursor) {
     return LexPunctuator(saved_cursor, '/');
   }
 
-  const uint32_t cp = ch.codepoint;
-
-  assert(
-      (cp == '/' || cp == '*') &&
-      "LexCommentOrSlash should only be called when the next character is '/' "
-      "or '*'");
-
-  if (cp == '/') return LexSingleLineComment(cursor);
+  if (ch.codepoint == '/') return LexSingleLineComment(cursor);
 
   return LexMultiLineComment(cursor);
 }
@@ -521,9 +509,14 @@ Token BufferedLexer::LexNewLine(Cursor cursor, uint32_t lead) {
 Token BufferedLexer::LexWhiteSpace(Cursor cursor) {
   while (!cursor.AtEnd()) {
     Cursor saved_cursor = cursor;
-    DecodedChar ch = cursor.DecodeUTF8();
+    DecodedChar ch = cursor.Next();
 
-    if (!ch.IsValid()) break;
+    // Invalid UTF-8 ends the run; restore so the bad byte is re-lexed as the
+    // next token rather than swallowed into the whitespace.
+    if (!ch.IsValid()) {
+      cursor = saved_cursor;
+      break;
+    }
 
     if (!IsWhitespace(ch.codepoint)) {
       return FinalizeToken(TokenKind::kWhitespace, saved_cursor);
@@ -556,18 +549,14 @@ Token BufferedLexer::FinalizeToken(TokenKind kind, Cursor cursor) {
 }
 
 Token BufferedLexer::LexToken() {
-  SkipIgnoredNullBytes();
-
   Cursor lookahead = cursor_;
-  DecodedChar ch = lookahead.DecodeUTF8();
+  DecodedChar ch = lookahead.Next();
 
   if (ch.IsEOF()) return EOFToken();
 
-  // Invalid UTF-8 sequences are treated as single-character tokens of kind
-  // kUnknown.
+  // Invalid UTF-8 sequences are single-character tokens of kind kUnknown.
+  // Next() has already advanced one byte past the bad lead byte.
   if (ch.IsInvalidUTF8()) {
-    lookahead.Advance();
-
     return FinalizeToken(TokenKind::kUnknown, lookahead);
   }
 
