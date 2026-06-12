@@ -80,10 +80,6 @@ DecodedChar Cursor::Next() noexcept {
   ++current_;
 
   for (int i = 1; i < len; ++i) {
-    had_line_splice_ |= SkipLineSplice();
-
-    if (current_ >= end_) return reject();
-
     const auto byte = static_cast<unsigned char>(*current_);
 
     if ((byte & 0xC0) != 0x80) return reject();

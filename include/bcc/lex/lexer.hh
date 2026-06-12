@@ -47,20 +47,21 @@ class BufferedLexer : public LexerBase {
   void InitializeTokenFlags() noexcept;
   void UpdateLexerState(TokenKind kind) noexcept;
 
-  Token LexToken();
-  Token LexNumericConstant(Cursor cursor);
-  Token LexPPNumberOrPeriod(Cursor cursor, uint32_t lead);
-  Token LexPunctuator(Cursor cursor, uint32_t lead);
-  Token LexIdentifier(Cursor cursor);
-  Token LexDelimitedLiteral(Cursor cursor, TokenKind kind, char delimiter);
-  Token LexDelimitedLiteralOrIdentifier(Cursor cursor, uint32_t lead);
-  Token LexMultiLineComment(Cursor cursor);
-  Token LexSingleLineComment(Cursor cursor);
-  Token LexCommentOrSlash(Cursor cursor);
-  Token LexNewLine(Cursor cursor, uint32_t lead);
-  Token LexWhiteSpace(Cursor cursor);
-  Token EOFToken();
-  Token FinalizeToken(TokenKind kind, Cursor cursor);
+  Token LexToken() noexcept;
+  Token LexNumericConstant(Cursor cursor) noexcept;
+  Token LexPPNumberOrPeriod(Cursor cursor, uint32_t lead) noexcept;
+  Token LexPunctuator(Cursor cursor, uint32_t lead) noexcept;
+  Token LexIdentifier(Cursor cursor) noexcept;
+  Token LexDelimitedLiteral(Cursor cursor, TokenKind kind,
+                            char delimiter) noexcept;
+  Token LexDelimitedLiteralOrIdentifier(Cursor cursor, uint32_t lead) noexcept;
+  Token LexMultiLineComment(Cursor cursor) noexcept;
+  Token LexSingleLineComment(Cursor cursor) noexcept;
+  Token LexCommentOrSlash(Cursor cursor) noexcept;
+  Token LexNewLine(Cursor cursor, uint32_t lead) noexcept;
+  Token LexWhiteSpace(Cursor cursor) noexcept;
+  Token EOFToken() noexcept;
+  Token FinalizeToken(TokenKind kind, Cursor cursor) noexcept;
 
   Cursor cursor_;
   TokenFlag current_token_flags_;

@@ -229,7 +229,7 @@ void BufferedLexer::UpdateLexerState(TokenKind kind) noexcept {
 //
 // Precondition: The first character of the pp-number has already been consumed
 //               and is either a digit or a '.' followed by a digit.
-Token BufferedLexer::LexNumericConstant(Cursor cursor) {
+Token BufferedLexer::LexNumericConstant(Cursor cursor) noexcept {
   while (!cursor.AtEnd()) {
     Cursor candidate = cursor;
     DecodedChar ch = candidate.Next();
@@ -259,7 +259,8 @@ Token BufferedLexer::LexNumericConstant(Cursor cursor) {
   return FinalizeToken(TokenKind::kNumericConstant, cursor);
 }
 
-Token BufferedLexer::LexPPNumberOrPeriod(Cursor cursor, uint32_t lead) {
+Token BufferedLexer::LexPPNumberOrPeriod(Cursor cursor,
+                                         uint32_t lead) noexcept {
   if (IsDigit(lead)) return LexNumericConstant(cursor);
 
   assert(lead == '.' &&
@@ -276,7 +277,7 @@ Token BufferedLexer::LexPPNumberOrPeriod(Cursor cursor, uint32_t lead) {
   return LexPunctuator(saved_cursor, lead);
 }
 
-Token BufferedLexer::LexPunctuator(Cursor cursor, uint32_t lead) {
+Token BufferedLexer::LexPunctuator(Cursor cursor, uint32_t lead) noexcept {
   struct PunctuatorSpelling {
     std::string_view spelling;
     TokenKind kind;
@@ -366,7 +367,7 @@ Token BufferedLexer::LexPunctuator(Cursor cursor, uint32_t lead) {
 //
 // Precondition: The first character of the identifier has already been
 //               consumed.
-Token BufferedLexer::LexIdentifier(Cursor cursor) {
+Token BufferedLexer::LexIdentifier(Cursor cursor) noexcept {
   while (!cursor.AtEnd()) {
     Cursor saved_cursor = cursor;
     DecodedChar ch = cursor.Next();
@@ -403,7 +404,7 @@ Token BufferedLexer::LexIdentifier(Cursor cursor) {
 // an escape that skips one character. Returns the token with `kind` on success.
 // Returns kUnknown for unterminated literals (unescaped newline or EOF).
 Token BufferedLexer::LexDelimitedLiteral(Cursor cursor, TokenKind kind,
-                                         char delimiter) {
+                                         char delimiter) noexcept {
   while (!cursor.AtEnd()) {
     Cursor saved = cursor;
     DecodedChar ch = cursor.Next();
@@ -430,7 +431,7 @@ Token BufferedLexer::LexDelimitedLiteral(Cursor cursor, TokenKind kind,
 }
 
 Token BufferedLexer::LexDelimitedLiteralOrIdentifier(Cursor cursor,
-                                                     uint32_t lead) {
+                                                     uint32_t lead) noexcept {
   if (auto prefix = TryClassifyLiteralPrefix(cursor, lead)) {
     return LexDelimitedLiteral(prefix->body, prefix->kind, prefix->delimiter);
   }
@@ -438,7 +439,7 @@ Token BufferedLexer::LexDelimitedLiteralOrIdentifier(Cursor cursor,
   return LexIdentifier(cursor);
 }
 
-Token BufferedLexer::LexMultiLineComment(Cursor cursor) {
+Token BufferedLexer::LexMultiLineComment(Cursor cursor) noexcept {
   bool seen_asterisk = false;
 
   while (!cursor.AtEnd()) {
@@ -459,7 +460,7 @@ Token BufferedLexer::LexMultiLineComment(Cursor cursor) {
   return FinalizeToken(TokenKind::kUnknown, cursor);
 }
 
-Token BufferedLexer::LexSingleLineComment(Cursor cursor) {
+Token BufferedLexer::LexSingleLineComment(Cursor cursor) noexcept {
   while (!cursor.AtEnd()) {
     Cursor saved_cursor = cursor;
     DecodedChar ch = cursor.Next();
@@ -480,7 +481,7 @@ Token BufferedLexer::LexSingleLineComment(Cursor cursor) {
 
 // precondition: The first character of the token has already been consumed
 //               and is a '/'.
-Token BufferedLexer::LexCommentOrSlash(Cursor cursor) {
+Token BufferedLexer::LexCommentOrSlash(Cursor cursor) noexcept {
   Cursor saved_cursor = cursor;
   DecodedChar ch = cursor.Next();
 
@@ -495,7 +496,7 @@ Token BufferedLexer::LexCommentOrSlash(Cursor cursor) {
   return LexMultiLineComment(cursor);
 }
 
-Token BufferedLexer::LexNewLine(Cursor cursor, uint32_t lead) {
+Token BufferedLexer::LexNewLine(Cursor cursor, uint32_t lead) noexcept {
   // Handle \r\n as a single newline token.
   if (lead == '\r' && !cursor.AtEnd() && *cursor.Current() == '\n') {
     cursor.Advance();
@@ -506,7 +507,7 @@ Token BufferedLexer::LexNewLine(Cursor cursor, uint32_t lead) {
 
 // Precondition: The first character of the token has already been consumed
 //               and is a whitespace character.
-Token BufferedLexer::LexWhiteSpace(Cursor cursor) {
+Token BufferedLexer::LexWhiteSpace(Cursor cursor) noexcept {
   while (!cursor.AtEnd()) {
     Cursor saved_cursor = cursor;
     DecodedChar ch = cursor.Next();
@@ -526,14 +527,14 @@ Token BufferedLexer::LexWhiteSpace(Cursor cursor) {
   return FinalizeToken(TokenKind::kWhitespace, cursor);
 }
 
-Token BufferedLexer::EOFToken() {
+Token BufferedLexer::EOFToken() noexcept {
   int offset = static_cast<int>(cursor_.End() - cursor_.Begin());
 
   return Token{SourceLocation{offset}, TokenKind::kEOF, "",
                current_token_flags_};
 }
 
-Token BufferedLexer::FinalizeToken(TokenKind kind, Cursor cursor) {
+Token BufferedLexer::FinalizeToken(TokenKind kind, Cursor cursor) noexcept {
   const char* start = cursor_.Current();
   const char* end = cursor.Current();
 
@@ -548,7 +549,7 @@ Token BufferedLexer::FinalizeToken(TokenKind kind, Cursor cursor) {
   return Token{loc, kind, std::move(lexeme), current_token_flags_};
 }
 
-Token BufferedLexer::LexToken() {
+Token BufferedLexer::LexToken() noexcept {
   Cursor lookahead = cursor_;
   DecodedChar ch = lookahead.Next();
 
