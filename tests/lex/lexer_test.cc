@@ -2,6 +2,8 @@
 
 #include <string_view>
 
+#include "bcc/basic/file_manager.hh"
+#include "bcc/basic/source_manager.hh"
 #include "gtest/gtest.h"
 
 namespace bcc {
@@ -10,95 +12,104 @@ namespace {
 struct ExpectedToken {
   TokenKind kind;
   std::string_view lexeme;
-  int offset;
+  uint32_t offset;
   bool start_of_line;
   bool leading_space;
   bool needs_cleaning;
 };
 
-BufferedLexer MakeLexer(std::string_view input) {
-  return BufferedLexer(SourceBuffer(input));
-}
-
 std::string MakeBytes(std::initializer_list<char> bytes) {
   return {bytes.begin(), bytes.end()};
 }
 
-void ExpectToken(const Token& token, const ExpectedToken& expected) {
-  EXPECT_EQ(token.GetKind(), expected.kind);
-  EXPECT_EQ(token.GetLexeme(), expected.lexeme);
-  EXPECT_EQ(token.GetLocation().offset, expected.offset);
-  EXPECT_EQ(token.IsStartOfLine(), expected.start_of_line);
-  EXPECT_EQ(token.HasLeadingSpace(), expected.leading_space);
-  EXPECT_EQ(token.NeedsCleaning(), expected.needs_cleaning);
-}
+class BufferedLexerTest : public ::testing::Test {
+ protected:
+  FileManager fm_;
+  SourceManager sm_{fm_};
+  uint32_t base_ = 0;
+
+  BufferedLexer Lex(std::string_view input) {
+    FileID fid = sm_.CreateFileID("", std::string(input));
+    base_ = sm_.GetLocForStartOfFile(fid).GetOffset();
+    return BufferedLexer(sm_, fid);
+  }
+
+  void ExpectToken(const Token& token, const ExpectedToken& expected) {
+    EXPECT_EQ(token.GetKind(), expected.kind);
+    EXPECT_EQ(token.GetLexeme(), expected.lexeme);
+    EXPECT_EQ(token.GetLocation().GetOffset() - base_, expected.offset);
+    EXPECT_EQ(token.IsStartOfLine(), expected.start_of_line);
+    EXPECT_EQ(token.HasLeadingSpace(), expected.leading_space);
+    EXPECT_EQ(token.NeedsCleaning(), expected.needs_cleaning);
+  }
+};
 
 //=== Line splice tests ===//
 
-TEST(BufferedLexerTest, BackslashNewlineAtEndOfInput) {
-  auto lexer = MakeLexer("\\\n");
+TEST_F(BufferedLexerTest, BackslashNewlineAtEndOfInput) {
+  auto lexer = Lex("\\\n");
   ExpectToken(lexer.NextToken(), {TokenKind::kEOF, "", 2, true, false, false});
 }
 
-TEST(BufferedLexerTest, BackslashAtEndOfInput) {
-  auto lexer = MakeLexer("\\");
+TEST_F(BufferedLexerTest, BackslashAtEndOfInput) {
+  auto lexer = Lex("\\");
   ExpectToken(lexer.NextToken(),
               {TokenKind::kUnknown, "\\", 0, true, false, false});
   ExpectToken(lexer.NextToken(), {TokenKind::kEOF, "", 1, false, false, false});
 }
 
-TEST(BufferedLexerTest, LineSpliceBeforeFirstToken) {
+TEST_F(BufferedLexerTest, LineSpliceBeforeFirstToken) {
   const std::string input = MakeBytes({'\\', '\n', 'i', 'n', 't'});
-  auto lexer = MakeLexer(input);
+  auto lexer = Lex(input);
   ExpectToken(lexer.NextToken(),
               {TokenKind::kIdentifier, "\\\nint", 0, true, false, true});
   ExpectToken(lexer.NextToken(), {TokenKind::kEOF, "", 5, false, false, false});
 }
 
-TEST(BufferedLexerTest, ConsecutiveLineSplicesBeforeToken) {
+TEST_F(BufferedLexerTest, ConsecutiveLineSplicesBeforeToken) {
   const std::string input = MakeBytes({'\\', '\n', '\\', '\n', 'i', 'n', 't'});
-  auto lexer = MakeLexer(input);
+  auto lexer = Lex(input);
   ExpectToken(lexer.NextToken(),
               {TokenKind::kIdentifier, "\\\n\\\nint", 0, true, false, true});
   ExpectToken(lexer.NextToken(), {TokenKind::kEOF, "", 7, false, false, false});
 }
 
-TEST(BufferedLexerTest, LineSpliceBetweenPunctuatorChars) {
+TEST_F(BufferedLexerTest, LineSpliceBetweenPunctuatorChars) {
   const std::string input = MakeBytes({'+', '\\', '\n', '='});
-  auto lexer = MakeLexer(input);
+  auto lexer = Lex(input);
   ExpectToken(lexer.NextToken(),
               {TokenKind::kPlusEqual, input, 0, true, false, true});
   ExpectToken(lexer.NextToken(), {TokenKind::kEOF, "", 4, false, false, false});
 }
 
-TEST(BufferedLexerTest, LineSpliceInsidePunctuatorUsesLongestMatch) {
+TEST_F(BufferedLexerTest, LineSpliceInsidePunctuatorUsesLongestMatch) {
   const std::string input = MakeBytes({'<', '\\', '\n', '<', '='});
-  auto lexer = MakeLexer(input);
+  auto lexer = Lex(input);
   ExpectToken(lexer.NextToken(),
               {TokenKind::kLessLessEqual, input, 0, true, false, true});
   ExpectToken(lexer.NextToken(), {TokenKind::kEOF, "", 5, false, false, false});
 }
 
-TEST(BufferedLexerTest, LineSpliceBetweenCommentSlashes) {
+TEST_F(BufferedLexerTest, LineSpliceBetweenCommentSlashes) {
   const std::string input = MakeBytes({'/', '\\', '\n', '/', 'x'});
   const std::string comment = MakeBytes({'/', '\\', '\n', '/', 'x'});
-  auto lexer = MakeLexer(input);
+  auto lexer = Lex(input);
   ExpectToken(lexer.NextToken(),
               {TokenKind::kComment, comment, 0, true, false, true});
   ExpectToken(lexer.NextToken(), {TokenKind::kEOF, "", 5, true, true, false});
 }
 
-TEST(BufferedLexerTest, LineSpliceBetweenSlashAndStarStartsBlockComment) {
+TEST_F(BufferedLexerTest, LineSpliceBetweenSlashAndStarStartsBlockComment) {
   const std::string input = MakeBytes({'/', '\\', '\n', '*', 'x', '*', '/'});
   const std::string comment = input;
-  auto lexer = MakeLexer(input);
+  auto lexer = Lex(input);
   ExpectToken(lexer.NextToken(),
               {TokenKind::kComment, comment, 0, true, false, true});
   ExpectToken(lexer.NextToken(), {TokenKind::kEOF, "", 7, true, true, false});
 }
 
-TEST(BufferedLexerTest, SingleBackslashBetweenTokens) {
-  auto lexer = MakeLexer("\\\\");
+TEST_F(BufferedLexerTest, SingleBackslashBetweenTokens) {
+  auto lexer = Lex("\\\\");
   ExpectToken(lexer.NextToken(),
               {TokenKind::kUnknown, "\\", 0, true, false, false});
   ExpectToken(lexer.NextToken(),
@@ -106,13 +117,13 @@ TEST(BufferedLexerTest, SingleBackslashBetweenTokens) {
   ExpectToken(lexer.NextToken(), {TokenKind::kEOF, "", 2, false, false, false});
 }
 
-TEST(BufferedLexerTest, BackslashVariantsAtEndOfInput) {
+TEST_F(BufferedLexerTest, BackslashVariantsAtEndOfInput) {
   // Line comment ending with backslash-newline at EOF.
   {
     const std::string input =
         MakeBytes({' ', ' ', '/', '/', ' ', ' ', '\\', '\n'});
     const std::string comment = MakeBytes({'/', '/', ' ', ' ', '\\', '\n'});
-    auto lexer = MakeLexer(input);
+    auto lexer = Lex(input);
     ExpectToken(lexer.NextToken(),
                 {TokenKind::kWhitespace, "  ", 0, true, false, false});
     ExpectToken(lexer.NextToken(),
@@ -122,7 +133,7 @@ TEST(BufferedLexerTest, BackslashVariantsAtEndOfInput) {
 
   // Double-backslash at end of input.
   {
-    auto lexer = MakeLexer("#include <\\\\");
+    auto lexer = Lex("#include <\\\\");
     ExpectToken(lexer.NextToken(),
                 {TokenKind::kHash, "#", 0, true, false, false});
     ExpectToken(lexer.NextToken(),
@@ -143,7 +154,7 @@ TEST(BufferedLexerTest, BackslashVariantsAtEndOfInput) {
   {
     const std::string input = MakeBytes(
         {'#', 'i', 'n', 'c', 'l', 'u', 'd', 'e', ' ', '<', '\\', '\\', '\n'});
-    auto lexer = MakeLexer(input);
+    auto lexer = Lex(input);
     ExpectToken(lexer.NextToken(),
                 {TokenKind::kHash, "#", 0, true, false, false});
     ExpectToken(lexer.NextToken(),
@@ -159,14 +170,14 @@ TEST(BufferedLexerTest, BackslashVariantsAtEndOfInput) {
   }
 }
 
-TEST(BufferedLexerTest, CharLiteralBackslashAtEndOfInput) {
-  auto lexer = MakeLexer("'a\\");
+TEST_F(BufferedLexerTest, CharLiteralBackslashAtEndOfInput) {
+  auto lexer = Lex("'a\\");
   ExpectToken(lexer.NextToken(),
               {TokenKind::kUnknown, "'a\\", 0, true, false, false});
   ExpectToken(lexer.NextToken(), {TokenKind::kEOF, "", 3, false, false, false});
 }
 
-TEST(BufferedLexerTest, CharLiteralEscapeThenLineSplice) {
+TEST_F(BufferedLexerTest, CharLiteralEscapeThenLineSplice) {
   // Input bytes:  '  \  \  \n  '
   //
   // After C phase 2 the \<newline> at bytes 2-3 is deleted, leaving '\''.
@@ -175,7 +186,7 @@ TEST(BufferedLexerTest, CharLiteralEscapeThenLineSplice) {
   // hit the raw newline at byte 3 and produce TokenKind::kUnknown.  We
   // match Clang's behaviour here, which is the de facto reference.
   const std::string input = MakeBytes({'\'', '\\', '\\', '\n', '\''});
-  auto lexer = MakeLexer(input);
+  auto lexer = Lex(input);
 
   ExpectToken(lexer.NextToken(),
               {TokenKind::kUnknown, input, 0, true, false, true});
@@ -184,29 +195,29 @@ TEST(BufferedLexerTest, CharLiteralEscapeThenLineSplice) {
 
 //=== PP-number tests ===//
 
-TEST(BufferedLexerTest, PpNumberHexFloat) {
-  auto lexer = MakeLexer("0x1.2p3");
+TEST_F(BufferedLexerTest, PpNumberHexFloat) {
+  auto lexer = Lex("0x1.2p3");
   ExpectToken(lexer.NextToken(),
               {TokenKind::kNumericConstant, "0x1.2p3", 0, true, false, false});
   ExpectToken(lexer.NextToken(), {TokenKind::kEOF, "", 7, false, false, false});
 }
 
-TEST(BufferedLexerTest, PpNumberMultipleDots) {
-  auto lexer = MakeLexer("1.2.3");
+TEST_F(BufferedLexerTest, PpNumberMultipleDots) {
+  auto lexer = Lex("1.2.3");
   ExpectToken(lexer.NextToken(),
               {TokenKind::kNumericConstant, "1.2.3", 0, true, false, false});
   ExpectToken(lexer.NextToken(), {TokenKind::kEOF, "", 5, false, false, false});
 }
 
-TEST(BufferedLexerTest, PpNumberEndingWithExponentSign) {
-  auto lexer = MakeLexer("1e+");
+TEST_F(BufferedLexerTest, PpNumberEndingWithExponentSign) {
+  auto lexer = Lex("1e+");
   ExpectToken(lexer.NextToken(),
               {TokenKind::kNumericConstant, "1e+", 0, true, false, false});
   ExpectToken(lexer.NextToken(), {TokenKind::kEOF, "", 3, false, false, false});
 }
 
-TEST(BufferedLexerTest, PpNumberExponentWithoutSign) {
-  auto lexer = MakeLexer("1e5 1E5");
+TEST_F(BufferedLexerTest, PpNumberExponentWithoutSign) {
+  auto lexer = Lex("1e5 1E5");
   ExpectToken(lexer.NextToken(),
               {TokenKind::kNumericConstant, "1e5", 0, true, false, false});
   ExpectToken(lexer.NextToken(),
@@ -216,50 +227,50 @@ TEST(BufferedLexerTest, PpNumberExponentWithoutSign) {
   ExpectToken(lexer.NextToken(), {TokenKind::kEOF, "", 7, false, false, false});
 }
 
-TEST(BufferedLexerTest, PpNumberExponentContinueWithDot) {
-  auto lexer = MakeLexer("1e0.5");
+TEST_F(BufferedLexerTest, PpNumberExponentContinueWithDot) {
+  auto lexer = Lex("1e0.5");
   ExpectToken(lexer.NextToken(),
               {TokenKind::kNumericConstant, "1e0.5", 0, true, false, false});
   ExpectToken(lexer.NextToken(), {TokenKind::kEOF, "", 5, false, false, false});
 }
 
-TEST(BufferedLexerTest, PpNumberExponentWithLetterSuffix) {
-  auto lexer = MakeLexer("1e5x");
+TEST_F(BufferedLexerTest, PpNumberExponentWithLetterSuffix) {
+  auto lexer = Lex("1e5x");
   ExpectToken(lexer.NextToken(),
               {TokenKind::kNumericConstant, "1e5x", 0, true, false, false});
   ExpectToken(lexer.NextToken(), {TokenKind::kEOF, "", 4, false, false, false});
 }
 
-TEST(BufferedLexerTest, PpNumberExponentSignWithUnderscore) {
-  auto lexer = MakeLexer("1e+_5");
+TEST_F(BufferedLexerTest, PpNumberExponentSignWithUnderscore) {
+  auto lexer = Lex("1e+_5");
   ExpectToken(lexer.NextToken(),
               {TokenKind::kNumericConstant, "1e+_5", 0, true, false, false});
   ExpectToken(lexer.NextToken(), {TokenKind::kEOF, "", 5, false, false, false});
 }
 
-TEST(BufferedLexerTest, PpNumberUnderscore) {
-  auto lexer = MakeLexer("1_2");
+TEST_F(BufferedLexerTest, PpNumberUnderscore) {
+  auto lexer = Lex("1_2");
   ExpectToken(lexer.NextToken(),
               {TokenKind::kNumericConstant, "1_2", 0, true, false, false});
   ExpectToken(lexer.NextToken(), {TokenKind::kEOF, "", 3, false, false, false});
 }
 
-TEST(BufferedLexerTest, PpNumberExponentWithHexDigits) {
-  auto lexer = MakeLexer("1e-0x");
+TEST_F(BufferedLexerTest, PpNumberExponentWithHexDigits) {
+  auto lexer = Lex("1e-0x");
   ExpectToken(lexer.NextToken(),
               {TokenKind::kNumericConstant, "1e-0x", 0, true, false, false});
   ExpectToken(lexer.NextToken(), {TokenKind::kEOF, "", 5, false, false, false});
 }
 
-TEST(BufferedLexerTest, PpNumberWithIdentifierSuffix) {
-  auto lexer = MakeLexer("42foo");
+TEST_F(BufferedLexerTest, PpNumberWithIdentifierSuffix) {
+  auto lexer = Lex("42foo");
   ExpectToken(lexer.NextToken(),
               {TokenKind::kNumericConstant, "42foo", 0, true, false, false});
   ExpectToken(lexer.NextToken(), {TokenKind::kEOF, "", 5, false, false, false});
 }
 
-TEST(BufferedLexerTest, PpNumbersWithExponentSigns) {
-  auto lexer = MakeLexer("0x1.fp+2 1.0e-3 .5e+1");
+TEST_F(BufferedLexerTest, PpNumbersWithExponentSigns) {
+  auto lexer = Lex("0x1.fp+2 1.0e-3 .5e+1");
 
   constexpr ExpectedToken kExpected[] = {
       {TokenKind::kNumericConstant, "0x1.fp+2", 0, true, false, false},
@@ -275,34 +286,34 @@ TEST(BufferedLexerTest, PpNumbersWithExponentSigns) {
   }
 }
 
-TEST(BufferedLexerTest, PpNumberDotLineSpliceDigit) {
+TEST_F(BufferedLexerTest, PpNumberDotLineSpliceDigit) {
   const std::string input = MakeBytes({'.', '\\', '\n', '5'});
-  auto lexer = MakeLexer(input);
+  auto lexer = Lex(input);
   ExpectToken(lexer.NextToken(),
               {TokenKind::kNumericConstant, input, 0, true, false, true});
   ExpectToken(lexer.NextToken(), {TokenKind::kEOF, "", 4, false, false, false});
 }
 
-TEST(BufferedLexerTest, PpNumberExponentLineSpliceSign) {
+TEST_F(BufferedLexerTest, PpNumberExponentLineSpliceSign) {
   const std::string input = MakeBytes({'1', 'e', '\\', '\n', '+', '5'});
-  auto lexer = MakeLexer(input);
+  auto lexer = Lex(input);
   ExpectToken(lexer.NextToken(),
               {TokenKind::kNumericConstant, input, 0, true, false, true});
   ExpectToken(lexer.NextToken(), {TokenKind::kEOF, "", 6, false, false, false});
 }
 
-TEST(BufferedLexerTest, PpNumberExponentLineSpliceMinusSign) {
+TEST_F(BufferedLexerTest, PpNumberExponentLineSpliceMinusSign) {
   const std::string input = MakeBytes({'1', 'e', '\\', '\n', '-', '5'});
-  auto lexer = MakeLexer(input);
+  auto lexer = Lex(input);
   ExpectToken(lexer.NextToken(),
               {TokenKind::kNumericConstant, input, 0, true, false, true});
   ExpectToken(lexer.NextToken(), {TokenKind::kEOF, "", 6, false, false, false});
 }
 
-TEST(BufferedLexerTest, PpNumberLineSpliceBetweenEachChar) {
+TEST_F(BufferedLexerTest, PpNumberLineSpliceBetweenEachChar) {
   const std::string input =
       MakeBytes({'4', '\\', '\n', '2', '\\', '\n', '.', '0'});
-  auto lexer = MakeLexer(input);
+  auto lexer = Lex(input);
   ExpectToken(lexer.NextToken(),
               {TokenKind::kNumericConstant, input, 0, true, false, true});
   ExpectToken(lexer.NextToken(), {TokenKind::kEOF, "", 8, false, false, false});
@@ -310,8 +321,8 @@ TEST(BufferedLexerTest, PpNumberLineSpliceBetweenEachChar) {
 
 //=== Identifier tests ===//
 
-TEST(BufferedLexerTest, Utf8IdentifierAsSingleToken) {
-  auto lexer = MakeLexer("变量 = 0");
+TEST_F(BufferedLexerTest, Utf8IdentifierAsSingleToken) {
+  auto lexer = Lex("变量 = 0");
 
   ExpectToken(lexer.NextToken(),
               {TokenKind::kIdentifier, "变量", 0, true, false, false});
@@ -327,8 +338,8 @@ TEST(BufferedLexerTest, Utf8IdentifierAsSingleToken) {
               {TokenKind::kEOF, "", 10, false, false, false});
 }
 
-TEST(BufferedLexerTest, UcnIdentifierDeclaration) {
-  auto lexer = MakeLexer("int \\u53d8\\u91cf = 0;");
+TEST_F(BufferedLexerTest, UcnIdentifierDeclaration) {
+  auto lexer = Lex("int \\u53d8\\u91cf = 0;");
 
   ExpectToken(lexer.NextToken(),
               {TokenKind::kIdentifier, "int", 0, true, false, false});
@@ -350,8 +361,8 @@ TEST(BufferedLexerTest, UcnIdentifierDeclaration) {
               {TokenKind::kEOF, "", 21, false, false, false});
 }
 
-TEST(BufferedLexerTest, PartialUcnAtTokenStart) {
-  auto lexer = MakeLexer("\\uQQQQ");
+TEST_F(BufferedLexerTest, PartialUcnAtTokenStart) {
+  auto lexer = Lex("\\uQQQQ");
   ExpectToken(lexer.NextToken(),
               {TokenKind::kUnknown, "\\", 0, true, false, false});
   ExpectToken(lexer.NextToken(),
@@ -359,15 +370,15 @@ TEST(BufferedLexerTest, PartialUcnAtTokenStart) {
   ExpectToken(lexer.NextToken(), {TokenKind::kEOF, "", 6, false, false, false});
 }
 
-TEST(BufferedLexerTest, UcnIdentifierStart) {
-  auto lexer = MakeLexer("\\u00e9");
+TEST_F(BufferedLexerTest, UcnIdentifierStart) {
+  auto lexer = Lex("\\u00e9");
   ExpectToken(lexer.NextToken(),
               {TokenKind::kIdentifier, "\\u00e9", 0, true, false, false});
   ExpectToken(lexer.NextToken(), {TokenKind::kEOF, "", 6, false, false, false});
 }
 
-TEST(BufferedLexerTest, IdentifierContinueWithUcn) {
-  auto lexer = MakeLexer("a\\u0030b");
+TEST_F(BufferedLexerTest, IdentifierContinueWithUcn) {
+  auto lexer = Lex("a\\u0030b");
   ExpectToken(lexer.NextToken(),
               {TokenKind::kIdentifier, "a", 0, true, false, false});
   ExpectToken(lexer.NextToken(),
@@ -377,9 +388,9 @@ TEST(BufferedLexerTest, IdentifierContinueWithUcn) {
   ExpectToken(lexer.NextToken(), {TokenKind::kEOF, "", 8, false, false, false});
 }
 
-TEST(BufferedLexerTest, UcnForBasicCharRejected) {
+TEST_F(BufferedLexerTest, UcnForBasicCharRejected) {
   // U+0041 is 'A', a character in the basic source character set.
-  auto lexer = MakeLexer("\\u0041");
+  auto lexer = Lex("\\u0041");
   ExpectToken(lexer.NextToken(),
               {TokenKind::kUnknown, "\\u0041", 0, true, false, false});
   ExpectToken(lexer.NextToken(), {TokenKind::kEOF, "", 6, false, false, false});
@@ -387,15 +398,15 @@ TEST(BufferedLexerTest, UcnForBasicCharRejected) {
 
 //=== Comment tests ===//
 
-TEST(BufferedLexerTest, LineCommentBackslashAtEndOfInput) {
-  auto lexer = MakeLexer("// \\");
+TEST_F(BufferedLexerTest, LineCommentBackslashAtEndOfInput) {
+  auto lexer = Lex("// \\");
   ExpectToken(lexer.NextToken(),
               {TokenKind::kComment, "// \\", 0, true, false, false});
   ExpectToken(lexer.NextToken(), {TokenKind::kEOF, "", 4, true, true, false});
 }
 
-TEST(BufferedLexerTest, UnterminatedBlockComment) {
-  auto lexer = MakeLexer("/* unterminated");
+TEST_F(BufferedLexerTest, UnterminatedBlockComment) {
+  auto lexer = Lex("/* unterminated");
 
   constexpr ExpectedToken kExpected[] = {
       {TokenKind::kUnknown, "/* unterminated", 0, true, false, false},
@@ -407,17 +418,17 @@ TEST(BufferedLexerTest, UnterminatedBlockComment) {
   }
 }
 
-TEST(BufferedLexerTest, NestedBlockComment) {
-  auto lexer = MakeLexer("/* /* */");
+TEST_F(BufferedLexerTest, NestedBlockComment) {
+  auto lexer = Lex("/* /* */");
   ExpectToken(lexer.NextToken(),
               {TokenKind::kComment, "/* /* */", 0, true, false, false});
   ExpectToken(lexer.NextToken(), {TokenKind::kEOF, "", 8, true, true, false});
 }
 
-TEST(BufferedLexerTest, BlockCommentStarSlashSeparatedByLineSplice) {
+TEST_F(BufferedLexerTest, BlockCommentStarSlashSeparatedByLineSplice) {
   // Input bytes:  /  *  SPACE  *  \  \n  /
   const std::string input = MakeBytes({'/', '*', ' ', '*', '\\', '\n', '/'});
-  auto lexer = MakeLexer(input);
+  auto lexer = Lex(input);
 
   Token comment = lexer.NextToken();
   ExpectToken(comment, {TokenKind::kComment, input, 0, true, false, true});
@@ -425,7 +436,7 @@ TEST(BufferedLexerTest, BlockCommentStarSlashSeparatedByLineSplice) {
   Token eof = lexer.NextToken();
   EXPECT_EQ(eof.GetKind(), TokenKind::kEOF);
   EXPECT_EQ(eof.GetLexeme(), "");
-  EXPECT_EQ(eof.GetLocation().offset, 7);
+  EXPECT_EQ(eof.GetLocation().GetOffset() - base_, 7u);
   EXPECT_TRUE(eof.IsStartOfLine());
   EXPECT_TRUE(eof.HasLeadingSpace());
   EXPECT_FALSE(eof.NeedsCleaning());
@@ -433,41 +444,41 @@ TEST(BufferedLexerTest, BlockCommentStarSlashSeparatedByLineSplice) {
 
 //=== String and character literal tests ===//
 
-TEST(BufferedLexerTest, EmptyStringLiteral) {
-  auto lexer = MakeLexer("\"\"");
+TEST_F(BufferedLexerTest, EmptyStringLiteral) {
+  auto lexer = Lex("\"\"");
   ExpectToken(lexer.NextToken(),
               {TokenKind::kStringLiteral, "\"\"", 0, true, false, false});
   ExpectToken(lexer.NextToken(), {TokenKind::kEOF, "", 2, false, false, false});
 }
 
-TEST(BufferedLexerTest, Utf8StringLiteral) {
-  auto lexer = MakeLexer("u8\"abc\"");
+TEST_F(BufferedLexerTest, Utf8StringLiteral) {
+  auto lexer = Lex("u8\"abc\"");
   ExpectToken(lexer.NextToken(), {TokenKind::kUtf8StringLiteral, "u8\"abc\"", 0,
                                   true, false, false});
   ExpectToken(lexer.NextToken(), {TokenKind::kEOF, "", 7, false, false, false});
 }
 
-TEST(BufferedLexerTest, StringLiteralBackslashAtEndOfInput) {
-  auto lexer = MakeLexer("\"foo\\");
+TEST_F(BufferedLexerTest, StringLiteralBackslashAtEndOfInput) {
+  auto lexer = Lex("\"foo\\");
   ExpectToken(lexer.NextToken(),
               {TokenKind::kUnknown, "\"foo\\", 0, true, false, false});
   ExpectToken(lexer.NextToken(), {TokenKind::kEOF, "", 5, false, false, false});
 }
 
-TEST(BufferedLexerTest, StringLiteralInvalidUtf8) {
+TEST_F(BufferedLexerTest, StringLiteralInvalidUtf8) {
   const std::string input = MakeBytes({'"', static_cast<char>(0x80), '"'});
-  auto lexer = MakeLexer(input);
+  auto lexer = Lex(input);
 
   ExpectToken(lexer.NextToken(),
               {TokenKind::kStringLiteral, input, 0, true, false, false});
   ExpectToken(lexer.NextToken(), {TokenKind::kEOF, "", 3, false, false, false});
 }
 
-TEST(BufferedLexerTest, TruncatedFourByteUtf8ProducesBytewiseUnknownTokens) {
+TEST_F(BufferedLexerTest, TruncatedFourByteUtf8ProducesBytewiseUnknownTokens) {
   const std::string input =
       MakeBytes({static_cast<char>(0xF0), static_cast<char>(0x90),
                  static_cast<char>(0x8D)});
-  auto lexer = MakeLexer(input);
+  auto lexer = Lex(input);
 
   ExpectToken(lexer.NextToken(),
               {TokenKind::kUnknown, input.substr(0, 1), 0, true, false, false});
@@ -478,11 +489,11 @@ TEST(BufferedLexerTest, TruncatedFourByteUtf8ProducesBytewiseUnknownTokens) {
   ExpectToken(lexer.NextToken(), {TokenKind::kEOF, "", 3, false, false, false});
 }
 
-TEST(BufferedLexerTest,
-     OverlongTwoByteUtf8AcrossLineSpliceProducesBytewiseUnknownTokens) {
+TEST_F(BufferedLexerTest,
+       OverlongTwoByteUtf8AcrossLineSpliceProducesBytewiseUnknownTokens) {
   const std::string input =
       MakeBytes({static_cast<char>(0xC0), '\\', '\n', static_cast<char>(0x80)});
-  auto lexer = MakeLexer(input);
+  auto lexer = Lex(input);
 
   ExpectToken(lexer.NextToken(),
               {TokenKind::kUnknown, "\xc0", 0, true, false, false});
@@ -491,36 +502,36 @@ TEST(BufferedLexerTest,
   ExpectToken(lexer.NextToken(), {TokenKind::kEOF, "", 4, false, false, false});
 }
 
-TEST(BufferedLexerTest, EmptyCharLiteral) {
-  auto lexer = MakeLexer("''");
+TEST_F(BufferedLexerTest, EmptyCharLiteral) {
+  auto lexer = Lex("''");
   ExpectToken(lexer.NextToken(),
               {TokenKind::kCharConstant, "''", 0, true, false, false});
   ExpectToken(lexer.NextToken(), {TokenKind::kEOF, "", 2, false, false, false});
 }
 
-TEST(BufferedLexerTest, EmptyWideCharLiteral) {
-  auto lexer = MakeLexer("L''");
+TEST_F(BufferedLexerTest, EmptyWideCharLiteral) {
+  auto lexer = Lex("L''");
   ExpectToken(lexer.NextToken(),
               {TokenKind::kWideCharConstant, "L''", 0, true, false, false});
   ExpectToken(lexer.NextToken(), {TokenKind::kEOF, "", 3, false, false, false});
 }
 
-TEST(BufferedLexerTest, EmptyUtf16CharLiteral) {
-  auto lexer = MakeLexer("u''");
+TEST_F(BufferedLexerTest, EmptyUtf16CharLiteral) {
+  auto lexer = Lex("u''");
   ExpectToken(lexer.NextToken(),
               {TokenKind::kUtf16CharConstant, "u''", 0, true, false, false});
   ExpectToken(lexer.NextToken(), {TokenKind::kEOF, "", 3, false, false, false});
 }
 
-TEST(BufferedLexerTest, EmptyUtf32CharLiteral) {
-  auto lexer = MakeLexer("U''");
+TEST_F(BufferedLexerTest, EmptyUtf32CharLiteral) {
+  auto lexer = Lex("U''");
   ExpectToken(lexer.NextToken(),
               {TokenKind::kUtf32CharConstant, "U''", 0, true, false, false});
   ExpectToken(lexer.NextToken(), {TokenKind::kEOF, "", 3, false, false, false});
 }
 
-TEST(BufferedLexerTest, U8CharLiteralIsIdentifierAndCharConstant) {
-  auto lexer = MakeLexer("u8'x'");
+TEST_F(BufferedLexerTest, U8CharLiteralIsIdentifierAndCharConstant) {
+  auto lexer = Lex("u8'x'");
   ExpectToken(lexer.NextToken(),
               {TokenKind::kIdentifier, "u8", 0, true, false, false});
   ExpectToken(lexer.NextToken(),
@@ -528,29 +539,29 @@ TEST(BufferedLexerTest, U8CharLiteralIsIdentifierAndCharConstant) {
   ExpectToken(lexer.NextToken(), {TokenKind::kEOF, "", 5, false, false, false});
 }
 
-TEST(BufferedLexerTest, WideCharLiteralWithContent) {
-  auto lexer = MakeLexer("L'x'");
+TEST_F(BufferedLexerTest, WideCharLiteralWithContent) {
+  auto lexer = Lex("L'x'");
   ExpectToken(lexer.NextToken(),
               {TokenKind::kWideCharConstant, "L'x'", 0, true, false, false});
   ExpectToken(lexer.NextToken(), {TokenKind::kEOF, "", 4, false, false, false});
 }
 
-TEST(BufferedLexerTest, UnterminatedCharLiteral) {
-  auto lexer = MakeLexer("'a");
+TEST_F(BufferedLexerTest, UnterminatedCharLiteral) {
+  auto lexer = Lex("'a");
   ExpectToken(lexer.NextToken(),
               {TokenKind::kUnknown, "'a", 0, true, false, false});
   ExpectToken(lexer.NextToken(), {TokenKind::kEOF, "", 2, false, false, false});
 }
 
-TEST(BufferedLexerTest, UnterminatedStringLiteral) {
-  auto lexer = MakeLexer("\"hello");
+TEST_F(BufferedLexerTest, UnterminatedStringLiteral) {
+  auto lexer = Lex("\"hello");
   ExpectToken(lexer.NextToken(),
               {TokenKind::kUnknown, "\"hello", 0, true, false, false});
   ExpectToken(lexer.NextToken(), {TokenKind::kEOF, "", 6, false, false, false});
 }
 
-TEST(BufferedLexerTest, NewlineInsideStringLiteral) {
-  auto lexer = MakeLexer("\"a\nb\"");
+TEST_F(BufferedLexerTest, NewlineInsideStringLiteral) {
+  auto lexer = Lex("\"a\nb\"");
   ExpectToken(lexer.NextToken(),
               {TokenKind::kUnknown, "\"a", 0, true, false, false});
   ExpectToken(lexer.NextToken(),
@@ -562,8 +573,8 @@ TEST(BufferedLexerTest, NewlineInsideStringLiteral) {
   ExpectToken(lexer.NextToken(), {TokenKind::kEOF, "", 5, false, false, false});
 }
 
-TEST(BufferedLexerTest, NewlineInsideCharLiteral) {
-  auto lexer = MakeLexer("'a\nb'");
+TEST_F(BufferedLexerTest, NewlineInsideCharLiteral) {
+  auto lexer = Lex("'a\nb'");
   ExpectToken(lexer.NextToken(),
               {TokenKind::kUnknown, "'a", 0, true, false, false});
   ExpectToken(lexer.NextToken(),
@@ -577,8 +588,8 @@ TEST(BufferedLexerTest, NewlineInsideCharLiteral) {
 
 //=== Punctuator tests ===//
 
-TEST(BufferedLexerTest, LongestPunctuatorMatchWithUnknownFallback) {
-  auto lexer = MakeLexer(">>=>>...##@");
+TEST_F(BufferedLexerTest, LongestPunctuatorMatchWithUnknownFallback) {
+  auto lexer = Lex(">>=>>...##@");
 
   constexpr ExpectedToken kExpected[] = {
       {TokenKind::kGreaterGreaterEqual, ">>=", 0, true, false, false},
@@ -594,15 +605,15 @@ TEST(BufferedLexerTest, LongestPunctuatorMatchWithUnknownFallback) {
   }
 }
 
-TEST(BufferedLexerTest, SlashEqualToken) {
-  auto lexer = MakeLexer("/=");
+TEST_F(BufferedLexerTest, SlashEqualToken) {
+  auto lexer = Lex("/=");
   ExpectToken(lexer.NextToken(),
               {TokenKind::kSlashEqual, "/=", 0, true, false, false});
   ExpectToken(lexer.NextToken(), {TokenKind::kEOF, "", 2, false, false, false});
 }
 
-TEST(BufferedLexerTest, IdentifierStartingWithEncodingPrefix) {
-  auto lexer = MakeLexer("uint union Local");
+TEST_F(BufferedLexerTest, IdentifierStartingWithEncodingPrefix) {
+  auto lexer = Lex("uint union Local");
   ExpectToken(lexer.NextToken(),
               {TokenKind::kIdentifier, "uint", 0, true, false, false});
   ExpectToken(lexer.NextToken(),
@@ -619,8 +630,8 @@ TEST(BufferedLexerTest, IdentifierStartingWithEncodingPrefix) {
 
 //=== Whitespace and newline tests ===//
 
-TEST(BufferedLexerTest, CarriageReturnAsNewline) {
-  auto lexer = MakeLexer("a\rb\r\nc");
+TEST_F(BufferedLexerTest, CarriageReturnAsNewline) {
+  auto lexer = Lex("a\rb\r\nc");
 
   ExpectToken(lexer.NextToken(),
               {TokenKind::kIdentifier, "a", 0, true, false, false});
@@ -635,8 +646,8 @@ TEST(BufferedLexerTest, CarriageReturnAsNewline) {
   ExpectToken(lexer.NextToken(), {TokenKind::kEOF, "", 6, false, false, false});
 }
 
-TEST(BufferedLexerTest, LeadingSpaceAcrossCommentsAndNewlines) {
-  auto lexer = MakeLexer(" \t/*gap*/name\n// tail\nnext");
+TEST_F(BufferedLexerTest, LeadingSpaceAcrossCommentsAndNewlines) {
+  auto lexer = Lex(" \t/*gap*/name\n// tail\nnext");
 
   constexpr ExpectedToken kExpected[] = {
       {TokenKind::kWhitespace, " \t", 0, true, false, false},
@@ -656,8 +667,8 @@ TEST(BufferedLexerTest, LeadingSpaceAcrossCommentsAndNewlines) {
 
 //=== Mixed token stream tests ===//
 
-TEST(BufferedLexerTest, MixedTokenStream) {
-  auto lexer = MakeLexer("foo /*x*/bar\n baz+=1.0e-3");
+TEST_F(BufferedLexerTest, MixedTokenStream) {
+  auto lexer = Lex("foo /*x*/bar\n baz+=1.0e-3");
 
   constexpr ExpectedToken kExpected[] = {
       {TokenKind::kIdentifier, "foo", 0, true, false, false},
@@ -677,15 +688,15 @@ TEST(BufferedLexerTest, MixedTokenStream) {
   }
 }
 
-TEST(BufferedLexerTest, LineSplicedTokensMarkedForCleaning) {
+TEST_F(BufferedLexerTest, LineSplicedTokensMarkedForCleaning) {
   const std::string input =
-      MakeBytes({'a', 'b', '\\', '\n', 'c', 'd', ' ', '"', 'x', '\\', '\n', 'y',
-                 '"', ' ', '1', '\\', '\n', '2'});
+      MakeBytes({'a', 'b', '\\', '\n', 'c', 'd', ' ', '"', 'x', '\\', '\n',
+                 'y', '"', ' ', '1', '\\', '\n', '2'});
   const std::string identifier = MakeBytes({'a', 'b', '\\', '\n', 'c', 'd'});
   const std::string string_literal =
       MakeBytes({'"', 'x', '\\', '\n', 'y', '"'});
   const std::string numeric = MakeBytes({'1', '\\', '\n', '2'});
-  auto lexer = MakeLexer(input);
+  auto lexer = Lex(input);
 
   const ExpectedToken kExpected[] = {
       {TokenKind::kIdentifier, identifier, 0, true, false, true},
@@ -703,10 +714,10 @@ TEST(BufferedLexerTest, LineSplicedTokensMarkedForCleaning) {
 
 //=== Edge case tests ===//
 
-TEST(BufferedLexerTest, NullBytesBetweenTokens) {
+TEST_F(BufferedLexerTest, NullBytesBetweenTokens) {
   const std::string input =
       MakeBytes({'i', 'n', 't', '\0', 'x', '\0', '=', '\0', '1'});
-  auto lexer = MakeLexer(input);
+  auto lexer = Lex(input);
 
   ExpectToken(lexer.NextToken(),
               {TokenKind::kIdentifier, "int", 0, true, false, false});
@@ -722,10 +733,10 @@ TEST(BufferedLexerTest, NullBytesBetweenTokens) {
 // Null bytes should set LeadingSpace (matching Clang behavior where null
 // bytes are treated as whitespace). Currently our lexer skips null bytes
 // without updating has_leading_space_, so this test documents the gap.
-TEST(BufferedLexerTest, NullBytesSetLeadingSpace) {
+TEST_F(BufferedLexerTest, NullBytesSetLeadingSpace) {
   // Leading null byte before an identifier: Clang sets LeadingSpace.
   {
-    auto lexer = MakeLexer(MakeBytes({'\0', 'i', 'n', 't'}));
+    auto lexer = Lex(MakeBytes({'\0', 'i', 'n', 't'}));
     ExpectToken(lexer.NextToken(),
                 {TokenKind::kIdentifier, "int", 1, true, true, false});
     ExpectToken(lexer.NextToken(),
@@ -734,7 +745,7 @@ TEST(BufferedLexerTest, NullBytesSetLeadingSpace) {
 
   // Null byte between two identifiers: Clang sets LeadingSpace on the second.
   {
-    auto lexer = MakeLexer(MakeBytes({'i', 'n', 't', '\0', 'x'}));
+    auto lexer = Lex(MakeBytes({'i', 'n', 't', '\0', 'x'}));
     ExpectToken(lexer.NextToken(),
                 {TokenKind::kIdentifier, "int", 0, true, false, false});
     ExpectToken(lexer.NextToken(),
@@ -746,7 +757,7 @@ TEST(BufferedLexerTest, NullBytesSetLeadingSpace) {
   // Multiple consecutive null bytes: Clang treats them as a single
   // whitespace run (still LeadingSpace).
   {
-    auto lexer = MakeLexer(MakeBytes({'i', 'n', 't', '\0', '\0', 'x'}));
+    auto lexer = Lex(MakeBytes({'i', 'n', 't', '\0', '\0', 'x'}));
     ExpectToken(lexer.NextToken(),
                 {TokenKind::kIdentifier, "int", 0, true, false, false});
     ExpectToken(lexer.NextToken(),

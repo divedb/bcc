@@ -2,6 +2,7 @@
 
 #include <cassert>
 
+#include "bcc/basic/source_manager.hh"
 #include "bcc/common/string_util.hh"
 #include "bcc/lex/identifier_util.hh"
 
@@ -172,6 +173,14 @@ DecodedChar DecodeUCN(Cursor& cursor) noexcept {
 }
 
 }  // namespace
+
+BufferedLexer::BufferedLexer(SourceManager& sm, FileID fid)
+    : sm_(sm),
+      fid_(fid),
+      cursor_(sm.GetBufferData(fid)),
+      current_token_flags_(TokenFlag::kNone),
+      is_at_start_of_line_(true),
+      has_leading_space_(false) {}
 
 Token BufferedLexer::NextToken() {
   while (!cursor_.AtEnd() && *cursor_.Current() == '\0') {
@@ -528,25 +537,26 @@ Token BufferedLexer::LexWhiteSpace(Cursor cursor) noexcept {
 }
 
 Token BufferedLexer::EOFToken() noexcept {
-  int offset = static_cast<int>(cursor_.End() - cursor_.Begin());
+  uint32_t local_offset =
+      static_cast<uint32_t>(cursor_.End() - cursor_.Begin());
 
-  return Token{SourceLocation{offset}, TokenKind::kEOF, "",
-               current_token_flags_};
+  return Token{sm_.GetLocForOffset(fid_, local_offset), TokenKind::kEOF,
+               cursor_.End(), 0u, current_token_flags_};
 }
 
 Token BufferedLexer::FinalizeToken(TokenKind kind, Cursor cursor) noexcept {
   const char* start = cursor_.Current();
   const char* end = cursor.Current();
-
-  std::string lexeme(start, static_cast<size_t>(end - start));
-  SourceLocation loc{static_cast<int>(start - cursor_.Begin())};
+  uint32_t length = static_cast<uint32_t>(end - start);
+  uint32_t local_offset = static_cast<uint32_t>(start - cursor_.Begin());
+  SourceLocation loc = sm_.GetLocForOffset(fid_, local_offset);
   cursor_ = cursor;  // commit here
 
   if (cursor.HadLineSplice()) [[unlikely]] {
     current_token_flags_ |= TokenFlag::kNeedsCleaning;
   }
 
-  return Token{loc, kind, std::move(lexeme), current_token_flags_};
+  return Token{loc, kind, start, length, current_token_flags_};
 }
 
 Token BufferedLexer::LexToken() noexcept {

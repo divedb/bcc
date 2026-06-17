@@ -1,8 +1,8 @@
 #pragma once
 
-#include <string>
+#include <string_view>
 
-#include "bcc/lex/source_location.hh"
+#include "bcc/basic/source_location.hh"
 #include "bcc/lex/token_kind.hh"
 
 namespace bcc {
@@ -31,14 +31,21 @@ inline constexpr TokenFlag& operator|=(TokenFlag& lhs, TokenFlag rhs) {
 
 class Token {
  public:
-  Token(SourceLocation loc, TokenKind kind, std::string lexeme,
+  /// \param data   Pointer into the owning SourceManager's buffer at the first
+  ///               byte of this token's raw source text. Not null-terminated.
+  /// \param length Number of raw source bytes, including any backslash-newline
+  ///               sequences (see NeedsCleaning()).
+  Token(SourceLocation loc, TokenKind kind, const char* data, uint32_t length,
         TokenFlag flag = TokenFlag::kNone)
-      : loc_(loc), kind_(kind), flag_(flag), lexeme_(std::move(lexeme)) {}
+      : data_(data), loc_(loc), length_(length), kind_(kind), flag_(flag) {}
 
   SourceLocation GetLocation() const noexcept { return loc_; }
   TokenKind GetKind() const noexcept { return kind_; }
 
-  const std::string& GetLexeme() const noexcept { return lexeme_; }
+  /// Returns a view of the raw source bytes for this token. The view is valid
+  /// for the lifetime of the owning SourceManager. If NeedsCleaning() is true,
+  /// backslash-newline sequences must be stripped before the text is used.
+  std::string_view GetLexeme() const noexcept { return {data_, length_}; }
 
   bool IsStartOfLine() const noexcept {
     return HasFlag(TokenFlag::kStartOfLine);
@@ -61,10 +68,11 @@ class Token {
     return (flag_ & flag) != TokenFlag::kNone;
   }
 
-  SourceLocation loc_;
+  SourceLocation loc_;  // global offset of data_[0]
+  const char* data_;    // non-owning pointer into SourceManager's buffer
+  uint32_t length_;
   TokenKind kind_;
   TokenFlag flag_;
-  std::string lexeme_;
 };
 
 }  // namespace bcc

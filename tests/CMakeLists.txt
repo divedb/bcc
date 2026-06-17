@@ -11,6 +11,16 @@ FetchContent_MakeAvailable(googletest)
 
 enable_testing()
 
+add_executable(bcc_basic_test
+  basic/file_manager_test.cc
+)
+
+target_link_libraries(bcc_basic_test
+  PRIVATE
+    bcc_basic
+    GTest::gtest_main
+)
+
 add_executable(bcc_lex_test
   lex/cursor_test.cc
   lex/identifier_util_test.cc
@@ -24,4 +34,5 @@ target_link_libraries(bcc_lex_test
 )
 
 include(GoogleTest)
+gtest_discover_tests(bcc_basic_test)
 gtest_discover_tests(bcc_lex_test)

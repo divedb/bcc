@@ -1,15 +1,14 @@
 #pragma once
 
-#include <cstddef>
 #include <cstdint>
-#include <optional>
-#include <string_view>
 
+#include "bcc/basic/file_id.hh"
 #include "bcc/lex/cursor.hh"
-#include "bcc/lex/source_buffer.hh"
 #include "bcc/lex/token.hh"
 
 namespace bcc {
+
+class SourceManager;
 
 class LexerBase {
  public:
@@ -35,11 +34,7 @@ class LexerBase {
 
 class BufferedLexer : public LexerBase {
  public:
-  explicit BufferedLexer(const SourceBuffer& buffer)
-      : cursor_(buffer.Data()),
-        current_token_flags_(TokenFlag::kNone),
-        is_at_start_of_line_(true),
-        has_leading_space_(false) {}
+  explicit BufferedLexer(SourceManager& sm, FileID fid);
 
   Token NextToken() override;
 
@@ -63,6 +58,8 @@ class BufferedLexer : public LexerBase {
   Token EOFToken() noexcept;
   Token FinalizeToken(TokenKind kind, Cursor cursor) noexcept;
 
+  SourceManager& sm_;
+  FileID fid_;
   Cursor cursor_;
   TokenFlag current_token_flags_;
   bool is_at_start_of_line_;

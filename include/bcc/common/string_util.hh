@@ -1,7 +1,7 @@
 #pragma once
 
 #include <cassert>
-#include <cctype>
+#include <cstdint>
 
 namespace bcc {
 
