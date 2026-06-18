@@ -1,6 +1,7 @@
 #include "bcc/lex/lexer.hh"
 
 #include <cassert>
+#include <optional>
 
 #include "bcc/basic/source_manager.hh"
 #include "bcc/common/string_util.hh"
