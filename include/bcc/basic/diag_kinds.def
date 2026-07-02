@@ -1,0 +1,48 @@
+// DIAG(id, Severity, "group", "message template")
+//
+// Severity is one of: kNote, kWarning, kError, kFatal
+// Group is the diagnostic group name (e.g. "unused-variable"), or "" for none.
+// Message arguments are referenced as %0, %1, … %N.
+// Use %% to emit a literal percent sign.
+
+// Lexer diagnostics
+DIAG(err_invalid_utf8, kError, "",
+     "invalid UTF-8 sequence")
+DIAG(err_unterminated_block_comment, kError, "",
+     "unterminated /* comment */")
+DIAG(err_unterminated_string_literal, kError, "",
+     "unterminated string literal")
+DIAG(err_unterminated_char_constant, kError, "",
+     "unterminated character constant")
+DIAG(err_malformed_ucn, kError, "",
+     "incomplete universal character name; expected "
+     "\\u<4 hex digits> or \\U<8 hex digits>")
+DIAG(err_forbidden_ucn_codepoint, kError, "",
+     "universal character name refers to a disallowed control character")
+DIAG(err_invalid_ucn_in_identifier, kError, "",
+     "universal character name cannot begin an identifier")
+
+// File/IO diagnostics
+DIAG(err_cannot_open_file, kError, "",
+     "cannot open '%0': %1")
+DIAG(err_no_input_file, kError, "",
+     "no input file")
+
+// Type-checking diagnostics
+DIAG(warn_int_conversion, kWarning, "int-conversion",
+     "incompatible integer to pointer conversion initializing '%0' with an expression of type '%1'")
+DIAG(warn_incompatible_ptr_types_discards_qualifiers, kWarning,
+     "incompatible-pointer-types-discards-qualifiers",
+     "initializing '%0' with an expression of type '%1' discards qualifiers")
+
+// Parser diagnostics
+DIAG(err_expected_rparen, kError, "",
+     "expected ')'")
+DIAG(note_to_match_this_lparen, kNote, "",
+     "to match this '('")
+
+// Notes
+DIAG(note_expanded_from_macro, kNote, "",
+     "expanded from macro '%0'")
+DIAG(note_in_file_included_from, kNote, "",
+     "in file included from %0:%1")

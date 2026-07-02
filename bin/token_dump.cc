@@ -2,8 +2,10 @@
 #include <string>
 #include <string_view>
 
+#include "bcc/basic/diagnostic.hh"
 #include "bcc/basic/file_manager.hh"
 #include "bcc/basic/source_manager.hh"
+#include "bcc/basic/text_diagnostic_printer.hh"
 #include "bcc/lex/lexer.hh"
 
 namespace {
@@ -71,11 +73,17 @@ bcc::FileID GetFileID(int argc, char* argv[], bcc::FileManager& fm,
 int main(int argc, char* argv[]) {
   bcc::FileManager fm;
   bcc::SourceManager sm(fm);
+
+  bcc::TextDiagnosticPrinter printer(std::cerr);
+  bcc::DiagnosticsEngine diag(&printer, &sm);
+
   bcc::FileID fid = GetFileID(argc, argv, fm, sm);
+  if (!fid.IsValid()) {
+    diag.Report(bcc::diag::err_no_input_file);
+    return 1;
+  }
 
-  if (!fid.IsValid()) return 1;
-
-  bcc::BufferedLexer lexer(sm, fid);
+  bcc::BufferedLexer lexer(sm, fid, &diag);
 
   for (;;) {
     bcc::Token tok = lexer.NextToken();

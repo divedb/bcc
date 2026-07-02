@@ -13,3 +13,7 @@ add_subdirectory(tests)
 add_executable(token_dump bin/token_dump.cc)
 target_link_libraries(token_dump PRIVATE bcc_lex)
 target_compile_features(token_dump PUBLIC cxx_std_20)
+
+add_executable(diag_demo bin/diag_demo.cc)
+target_link_libraries(diag_demo PRIVATE bcc_basic)
+target_compile_features(diag_demo PUBLIC cxx_std_20)

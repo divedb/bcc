@@ -3,6 +3,8 @@
 #include <cassert>
 #include <optional>
 
+#include "bcc/basic/diagnostic.hh"
+#include "bcc/basic/diagnostic_ids.hh"
 #include "bcc/basic/source_manager.hh"
 #include "bcc/common/string_util.hh"
 #include "bcc/lex/identifier_util.hh"
@@ -175,9 +177,11 @@ DecodedChar DecodeUCN(Cursor& cursor) noexcept {
 
 }  // namespace
 
-BufferedLexer::BufferedLexer(SourceManager& sm, FileID fid)
+BufferedLexer::BufferedLexer(SourceManager& sm, FileID fid,
+                             DiagnosticsEngine* diag)
     : sm_(sm),
       fid_(fid),
+      diag_(diag),
       cursor_(sm.GetBufferData(fid)),
       current_token_flags_(TokenFlag::kNone),
       is_at_start_of_line_(true),
@@ -433,10 +437,24 @@ Token BufferedLexer::LexDelimitedLiteral(Cursor cursor, TokenKind kind,
     }
 
     if (IsNewLine(ch.codepoint)) {
+      // Unterminated literal ended by a newline.
+      if (diag_) {
+        diag::DiagKind dk = (delimiter == '\'')
+                                ? diag::err_unterminated_char_constant
+                                : diag::err_unterminated_string_literal;
+        diag_->Report(CurrentTokenLoc(), dk);
+      }
       return FinalizeToken(TokenKind::kUnknown, saved);
     }
   }
 
+  // Unterminated literal ended by EOF.
+  if (diag_) {
+    diag::DiagKind dk = (delimiter == '\'')
+                            ? diag::err_unterminated_char_constant
+                            : diag::err_unterminated_string_literal;
+    diag_->Report(CurrentTokenLoc(), dk);
+  }
   return FinalizeToken(TokenKind::kUnknown, cursor);
 }
 
@@ -466,7 +484,8 @@ Token BufferedLexer::LexMultiLineComment(Cursor cursor) noexcept {
     seen_asterisk = (cp == '*');
   }
 
-  // Unterminated comment; emit an unknown token for the entire comment text.
+  // Unterminated comment.
+  if (diag_) diag_->Report(CurrentTokenLoc(), diag::err_unterminated_block_comment);
   return FinalizeToken(TokenKind::kUnknown, cursor);
 }
 
@@ -537,6 +556,12 @@ Token BufferedLexer::LexWhiteSpace(Cursor cursor) noexcept {
   return FinalizeToken(TokenKind::kWhitespace, cursor);
 }
 
+SourceLocation BufferedLexer::CurrentTokenLoc() const noexcept {
+  uint32_t offset =
+      static_cast<uint32_t>(cursor_.Current() - cursor_.Begin());
+  return sm_.GetLocForOffset(fid_, offset);
+}
+
 Token BufferedLexer::EOFToken() noexcept {
   uint32_t local_offset =
       static_cast<uint32_t>(cursor_.End() - cursor_.Begin());
@@ -569,6 +594,7 @@ Token BufferedLexer::LexToken() noexcept {
   // Invalid UTF-8 sequences are single-character tokens of kind kUnknown.
   // Next() has already advanced one byte past the bad lead byte.
   if (ch.IsInvalidUTF8()) {
+    if (diag_) diag_->Report(CurrentTokenLoc(), diag::err_invalid_utf8);
     return FinalizeToken(TokenKind::kUnknown, lookahead);
   }
 
@@ -591,12 +617,20 @@ Token BufferedLexer::LexToken() noexcept {
     DecodedChar ucn = DecodeUCN(lookahead);
 
     if (!ucn.IsValid()) {
-      // Truly malformed UCN — emit only '\', re-lex 'u...' as identifier
+      // Truly malformed UCN — emit only '\', re-lex 'u...' as identifier.
+      if (diag_) diag_->Report(CurrentTokenLoc(), diag::err_malformed_ucn);
       return FinalizeToken(TokenKind::kUnknown, before_ucn);
     }
 
-    if (IsForbiddenUCNCodepoint(ucn.codepoint) ||
-        !IsIdentifierStart(ucn.codepoint)) {
+    if (IsForbiddenUCNCodepoint(ucn.codepoint)) {
+      if (diag_)
+        diag_->Report(CurrentTokenLoc(), diag::err_forbidden_ucn_codepoint);
+      return FinalizeToken(TokenKind::kUnknown, lookahead);
+    }
+
+    if (!IsIdentifierStart(ucn.codepoint)) {
+      if (diag_)
+        diag_->Report(CurrentTokenLoc(), diag::err_invalid_ucn_in_identifier);
       return FinalizeToken(TokenKind::kUnknown, lookahead);
     }
 

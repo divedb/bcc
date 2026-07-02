@@ -10,9 +10,12 @@ target_include_directories(bcc_support
 target_compile_features(bcc_support PUBLIC cxx_std_20)
 
 add_library(bcc_basic
+  basic/diagnostic.cc
+  basic/diagnostic_options.cc
   basic/file_manager.cc
   basic/line_table.cc
   basic/source_manager.cc
+  basic/text_diagnostic_printer.cc
 )
 
 target_include_directories(bcc_basic

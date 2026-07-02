@@ -40,7 +40,8 @@ const FileEntry* FileManager::GetFile(std::string_view path) {
   auto& entry = inode_to_file_[key];
 
   if (!entry) {
-    entry.reset(new FileEntry(resolved, st.st_size, st.st_mtime, next_uid_++));
+    entry.reset(new FileEntry(std::move(resolved), st.st_size, st.st_mtime,
+                              next_uid_++));
   }
 
   it->second = entry.get();

@@ -8,6 +8,7 @@
 
 namespace bcc {
 
+class DiagnosticsEngine;
 class SourceManager;
 
 class LexerBase {
@@ -34,7 +35,11 @@ class LexerBase {
 
 class BufferedLexer : public LexerBase {
  public:
-  explicit BufferedLexer(SourceManager& sm, FileID fid);
+  /// \param diag  Optional diagnostics engine. When non-null, the lexer emits
+  ///              structured diagnostics for malformed input instead of silently
+  ///              returning kUnknown tokens.
+  explicit BufferedLexer(SourceManager& sm, FileID fid,
+                         DiagnosticsEngine* diag = nullptr);
 
   Token NextToken() override;
 
@@ -58,12 +63,18 @@ class BufferedLexer : public LexerBase {
   Token EOFToken() noexcept;
   Token FinalizeToken(TokenKind kind, Cursor cursor) noexcept;
 
-  SourceManager& sm_;
-  FileID fid_;
-  Cursor cursor_;
-  TokenFlag current_token_flags_;
-  bool is_at_start_of_line_;
-  bool has_leading_space_;
+  /// \brief Returns the source location of the first byte of the token
+  ///        currently being lexed (i.e. cursor_'s position before any
+  ///        look-ahead has been committed via FinalizeToken).
+  SourceLocation CurrentTokenLoc() const noexcept;
+
+  SourceManager&     sm_;
+  FileID             fid_;
+  DiagnosticsEngine* diag_;
+  Cursor             cursor_;
+  TokenFlag          current_token_flags_;
+  bool               is_at_start_of_line_;
+  bool               has_leading_space_;
 };
 
 }  // namespace bcc
