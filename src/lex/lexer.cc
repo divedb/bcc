@@ -229,6 +229,51 @@ void BufferedLexer::UpdateLexerState(TokenKind kind) noexcept {
   }
 }
 
+Token BufferedLexer::LexIncludeFilename() noexcept {
+  // Skip horizontal whitespace only; a newline ends the directive line and is
+  // left for the caller (via the fallback path) to observe.
+  while (!cursor_.AtEnd() && IsWhitespace(
+                                 static_cast<unsigned char>(*cursor_.Current()))) {
+    has_leading_space_ = true;
+    cursor_.Advance();
+  }
+
+  InitializeTokenFlags();
+
+  if (cursor_.AtEnd()) return EOFToken();
+
+  const char open = *cursor_.Current();
+  if (open == '<' || open == '"') {
+    const char close = (open == '<') ? '>' : '"';
+
+    // Scan on a copy so the cursor is untouched if the name is unterminated.
+    Cursor scan = cursor_;
+    scan.Advance();  // consume the opening delimiter
+
+    while (!scan.AtEnd()) {
+      const char c = *scan.Current();
+
+      // A newline before the closing delimiter means the header name is
+      // unterminated; bail out and let the caller re-lex from the delimiter.
+      if (IsNewLine(static_cast<unsigned char>(c))) break;
+
+      scan.Advance();
+
+      if (c == close) {
+        Token token = FinalizeToken(TokenKind::kHeaderName, scan);
+        UpdateLexerState(TokenKind::kHeaderName);
+        return token;
+      }
+    }
+  }
+
+  // Not a header name (or unterminated): lex the next token normally so a
+  // computed include can be macro-expanded by the caller.
+  Token token = LexToken();
+  UpdateLexerState(token.GetKind());
+  return token;
+}
+
 // 6.4.8 Preprocessing numbers
 // Syntax
 // pp-number:
@@ -617,7 +662,21 @@ Token BufferedLexer::LexToken() noexcept {
     DecodedChar ucn = DecodeUCN(lookahead);
 
     if (!ucn.IsValid()) {
-      // Truly malformed UCN — emit only '\', re-lex 'u...' as identifier.
+      // Not a valid UCN.  Treat it as an identifier (includes '\') when the
+      // next character can start an identifier -- this accommodates GAS macro
+      // parameters such as \name inside .macro / .endm blocks.  Otherwise
+      // emit the stray backslash as kUnknown.
+      if (!before_ucn.AtEnd()) {
+        unsigned char first = *before_ucn.Current();
+        // \u and \U are UCN prefix attempts; if the hex digits are bogus we
+        // still want the malformed-UCN diagnostic.  For any other letter,
+        // underscore, or high-byte start, treat as an assembly-style
+        // \name identifier (GAS macro parameter).
+        if ((std::isalpha(first) && first != 'u' && first != 'U') ||
+            first == '_' || first & 0x80) {
+          return LexIdentifier(lookahead);
+        }
+      }
       if (diag_) diag_->Report(CurrentTokenLoc(), diag::err_malformed_ucn);
       return FinalizeToken(TokenKind::kUnknown, before_ucn);
     }

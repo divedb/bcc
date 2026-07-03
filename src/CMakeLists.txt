@@ -46,3 +46,45 @@ target_link_libraries(bcc_lex
   PUBLIC
     bcc_basic
 )
+
+add_library(bcc_pp
+  pp/header_search.cc
+  pp/identifier_table.cc
+  pp/macro_args.cc
+  pp/pp_directives.cc
+  pp/pp_expressions.cc
+  pp/pp_lexer.cc
+  pp/pp_macro_expansion.cc
+  pp/preprocessor.cc
+  pp/scratch_buffer.cc
+)
+
+target_include_directories(bcc_pp
+  PUBLIC
+    ${PROJECT_SOURCE_DIR}/include
+)
+
+target_compile_features(bcc_pp PUBLIC cxx_std_20)
+
+target_link_libraries(bcc_pp
+  PUBLIC
+    bcc_lex
+)
+
+# Standalone x86-64 assembler (AT&T syntax -> ELF64). Self-contained: it does
+# not depend on the C front-end libraries above.
+add_library(bcc_as
+  as/lexer.cc
+  as/register.cc
+  as/mccontext.cc
+  as/encoder.cc
+  as/parser.cc
+  as/elf_writer.cc
+)
+
+target_include_directories(bcc_as
+  PUBLIC
+    ${PROJECT_SOURCE_DIR}/include
+)
+
+target_compile_features(bcc_as PUBLIC cxx_std_20)

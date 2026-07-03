@@ -12,7 +12,7 @@ FetchContent_MakeAvailable(googletest)
 enable_testing()
 
 add_executable(bcc_basic_test
-  basic/file_manager_test.cc
+  unittest/basic/file_manager_test.cc
 )
 
 target_link_libraries(bcc_basic_test
@@ -22,9 +22,9 @@ target_link_libraries(bcc_basic_test
 )
 
 add_executable(bcc_lex_test
-  lex/cursor_test.cc
-  lex/identifier_util_test.cc
-  lex/lexer_test.cc
+  unittest/lex/cursor_test.cc
+  unittest/lex/identifier_util_test.cc
+  unittest/lex/lexer_test.cc
 )
 
 target_link_libraries(bcc_lex_test
@@ -33,6 +33,39 @@ target_link_libraries(bcc_lex_test
     GTest::gtest_main
 )
 
+add_executable(bcc_pp_test
+  unittest/pp/conditional_test.cc
+  unittest/pp/directive_test.cc
+  unittest/pp/function_macro_test.cc
+  unittest/pp/identifier_table_test.cc
+  unittest/pp/include_test.cc
+  unittest/pp/macro_expansion_test.cc
+  unittest/pp/pp_client_test.cc
+  unittest/pp/pp_lexer_test.cc
+  unittest/pp/preprocessor_test.cc
+)
+
+target_link_libraries(bcc_pp_test
+  PRIVATE
+    bcc_pp
+    GTest::gtest_main
+)
+
+add_executable(bcc_as_test
+  unittest/as/assembler_test.cc
+)
+
+target_link_libraries(bcc_as_test
+  PRIVATE
+    bcc_as
+    GTest::gtest_main
+)
+
+add_subdirectory(regression/preprocessor)
+add_subdirectory(regression/lexer)
+
 include(GoogleTest)
 gtest_discover_tests(bcc_basic_test)
 gtest_discover_tests(bcc_lex_test)
+gtest_discover_tests(bcc_pp_test)
+gtest_discover_tests(bcc_as_test)

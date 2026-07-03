@@ -7,6 +7,8 @@
 
 namespace bcc {
 
+class IdentifierInfo;
+
 enum class TokenFlag : uint8_t {
   kNone = 0,
   kStartOfLine = 0x01,    ///< At start of line or only after whitespace.
@@ -42,6 +44,28 @@ class Token {
   SourceLocation GetLocation() const noexcept { return loc_; }
   TokenKind GetKind() const noexcept { return kind_; }
 
+  /// Overwrites the token kind. Used by the preprocessor to promote an
+  /// identifier token to its keyword kind after identifier lookup.
+  void SetKind(TokenKind kind) noexcept { kind_ = kind; }
+
+  /// Overwrites the source location. Used by the TokenLexer to relocate a
+  /// macro's replacement tokens into their macro-expansion slots.
+  void SetLocation(SourceLocation loc) noexcept { loc_ = loc; }
+
+  void SetFlag(TokenFlag flag) noexcept { flag_ |= flag; }
+  void ClearFlag(TokenFlag flag) noexcept {
+    flag_ = static_cast<TokenFlag>(static_cast<uint8_t>(flag_) &
+                                   ~static_cast<uint8_t>(flag));
+  }
+
+  /// The interned identifier information for this token, or nullptr.
+  ///
+  /// Set by the preprocessor (see Preprocessor::LookUpIdentifierInfo) for
+  /// identifier and keyword tokens; nullptr for all other tokens and for any
+  /// identifier that has not yet been looked up.
+  IdentifierInfo* GetIdentifierInfo() const noexcept { return ident_; }
+  void SetIdentifierInfo(IdentifierInfo* info) noexcept { ident_ = info; }
+
   /// Returns a view of the raw source bytes for this token. The view is valid
   /// for the lifetime of the owning SourceManager. If NeedsCleaning() is true,
   /// backslash-newline sequences must be stripped before the text is used.
@@ -70,6 +94,7 @@ class Token {
 
   SourceLocation loc_;  // global offset of data_[0]
   const char* data_;    // non-owning pointer into SourceManager's buffer
+  IdentifierInfo* ident_ = nullptr;  // set by the preprocessor; see above
   uint32_t length_;
   TokenKind kind_;
   TokenFlag flag_;

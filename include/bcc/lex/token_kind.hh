@@ -136,6 +136,13 @@ enum class TokenKind : uint16_t {
   kNewLine,     // '\n'
   kWhitespace,  // ' ', '\t', '\v', '\f'
   kComment,     // // comment or /* comment */
+
+  //===----------------------------------------------------------------------===//
+  // Preprocessor-only tokens
+  //===----------------------------------------------------------------------===//
+  kHeaderName,  // <stdio.h> or "foo.h" in an #include directive
+  kEod,         // End of a preprocessing directive (a directive's newline)
+
   kUnknown,     // Any unrecognized token
   kEOF,         // End of file/input
 };
@@ -249,6 +256,8 @@ inline constexpr std::string_view kTokenKindNames[] = {
     "newline",               // kNewLine
     "whitespace",            // kWhitespace
     "comment",               // kComment
+    "header_name",           // kHeaderName
+    "eod",                   // kEod
     "unknown",               // kUnknown
     "eof",                   // kEOF
 };
@@ -276,5 +285,23 @@ constexpr bool IsStringLiteralKind(TokenKind kind) noexcept {
          kind == TokenKind::kUtf32StringLiteral ||
          kind == TokenKind::kWideStringLiteral;
 }
+
+/// The C keyword token kinds occupy a contiguous range at the front of the
+/// enum, from kAuto through kThreadLocal inclusive. Keeping this range dense
+/// lets the IdentifierTable seed every keyword by iterating [kFirstKeyword,
+/// kLastKeyword] and looking up its spelling via TokenKindName().
+inline constexpr TokenKind kFirstKeyword = TokenKind::kAuto;
+inline constexpr TokenKind kLastKeyword = TokenKind::kThreadLocal;
+
+constexpr bool IsKeywordKind(TokenKind kind) noexcept {
+  auto v = static_cast<uint16_t>(kind);
+  return v >= static_cast<uint16_t>(kFirstKeyword) &&
+         v <= static_cast<uint16_t>(kLastKeyword);
+}
+
+static_assert(IsKeywordKind(TokenKind::kAuto));
+static_assert(IsKeywordKind(TokenKind::kThreadLocal));
+static_assert(!IsKeywordKind(TokenKind::kIdentifier));
+static_assert(!IsKeywordKind(TokenKind::kLSquare));
 
 }  // namespace bcc

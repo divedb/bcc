@@ -1,0 +1,48 @@
+// PP_KEYWORD(EnumId, "spelling")
+//
+// Preprocessor keywords: identifiers that carry special meaning to the
+// preprocessor. This covers the directive names recognized after a leading
+// '#' (e.g. #include, #define, #if) as well as the operators that are only
+// meaningful inside a #if expression (defined, __has_include).
+//
+// Note these are lexed as ordinary identifiers; the pp-keyword id is an
+// additional annotation stored on the IdentifierInfo, orthogonal to whether
+// the same spelling is also a C keyword (e.g. "if" is both).
+
+// Conditional inclusion
+PP_KEYWORD(kIf,       "if")
+PP_KEYWORD(kIfdef,    "ifdef")
+PP_KEYWORD(kIfndef,   "ifndef")
+PP_KEYWORD(kElif,     "elif")
+PP_KEYWORD(kElifdef,  "elifdef")
+PP_KEYWORD(kElifndef, "elifndef")
+PP_KEYWORD(kElse,     "else")
+PP_KEYWORD(kEndif,    "endif")
+
+// Macro definition
+PP_KEYWORD(kDefine, "define")
+PP_KEYWORD(kUndef,  "undef")
+
+// Source file inclusion
+PP_KEYWORD(kInclude,       "include")
+PP_KEYWORD(kIncludeNext,   "include_next")
+PP_KEYWORD(kImport,        "import")
+PP_KEYWORD(kIncludeMacros, "__include_macros")
+
+// Other directives
+PP_KEYWORD(kLine,    "line")
+PP_KEYWORD(kError,   "error")
+PP_KEYWORD(kWarning, "warning")
+PP_KEYWORD(kPragma,  "pragma")
+PP_KEYWORD(kIdent,   "ident")
+PP_KEYWORD(kSccs,    "sccs")
+
+// #if-expression operators
+PP_KEYWORD(kDefined,        "defined")
+PP_KEYWORD(kHasInclude,     "__has_include")
+PP_KEYWORD(kHasIncludeNext, "__has_include_next")
+PP_KEYWORD(kHasBuiltin,     "__has_builtin")
+PP_KEYWORD(kHasAttribute,   "__has_attribute")
+
+// Conditional macro expansion (C23 / C++20)
+PP_KEYWORD(kVAOpt, "__VA_OPT__")

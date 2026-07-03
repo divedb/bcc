@@ -41,6 +41,68 @@ DIAG(err_expected_rparen, kError, "",
 DIAG(note_to_match_this_lparen, kNote, "",
      "to match this '('")
 
+// Preprocessor conditional / expression diagnostics
+DIAG(err_pp_expected_value, kError, "",
+     "expected value in preprocessor expression")
+DIAG(err_pp_expected_rparen, kError, "",
+     "expected ')' in preprocessor expression")
+DIAG(err_pp_division_by_zero, kError, "",
+     "division by zero in preprocessor expression")
+DIAG(err_pp_floating_constant, kError, "",
+     "floating point constant in preprocessor expression")
+DIAG(err_pp_expected_macro_name, kError, "",
+     "macro name missing")
+DIAG(err_pp_endif_without_if, kError, "",
+     "#endif without #if")
+DIAG(err_pp_without_if, kError, "",
+     "#%0 without #if")
+DIAG(err_pp_after_else, kError, "",
+     "#%0 after #else")
+DIAG(err_pp_unterminated_conditional, kError, "",
+     "unterminated conditional directive")
+
+// Preprocessor #include / header search diagnostics
+DIAG(err_pp_expected_filename, kError, "",
+     "expected \"FILENAME\" or <FILENAME>")
+DIAG(err_pp_empty_filename, kError, "",
+     "empty filename")
+DIAG(err_pp_file_not_found, kError, "",
+     "'%0' file not found")
+DIAG(err_pp_include_too_deep, kError, "",
+     "#include nested too deeply")
+
+// Preprocessor #line / #error / #warning diagnostics
+DIAG(err_pp_error_directive, kError, "",
+     "%0")
+DIAG(warn_pp_warning_directive, kWarning, "#warning",
+     "%0")
+DIAG(err_pp_line_requires_integer, kError, "",
+     "#line directive requires a positive integer argument")
+DIAG(err_pp_line_invalid_filename, kError, "",
+     "invalid filename for #line directive")
+
+// Preprocessor #pragma diagnostics
+DIAG(err_pp_poisoned_macro, kError, "",
+     "attempt to use poisoned macro '%0'")
+DIAG(warn_pp_poison_after_define, kWarning, "",
+     "#pragma GCC poison was applied to a macro that was defined")
+DIAG(err_pp_poison_non_identifier, kError, "",
+     "cannot poison non-identifier")
+DIAG(warn_pp_dependency_out_of_date, kWarning, "",
+     "current file is older than dependency '%0'")
+DIAG(err_pp_pragma_string_literal, kError, "",
+     "expected a string literal for '#pragma %0'")
+DIAG(err_pp_pragma_push_macro, kError, "",
+     "expected \"%0\" for #pragma push_macro")
+DIAG(err_pp_pragma_pop_macro, kError, "",
+     "expected \"%0\" for #pragma pop_macro")
+DIAG(err_pp_pragma_diagnostic_invalid, kError, "",
+     "invalid diagnostic pragma")
+DIAG(err_pp_include_next_not_found, kError, "",
+     "'%0' file not found from #include_next")
+DIAG(err_pp_import_failed, kError, "",
+     "'%0' file not found for #import")
+
 // Notes
 DIAG(note_expanded_from_macro, kNote, "",
      "expanded from macro '%0'")

@@ -43,6 +43,24 @@ class BufferedLexer : public LexerBase {
 
   Token NextToken() override;
 
+  /// \brief Sets the leading-space flag that will be applied to the next token.
+  void SetHasLeadingSpace(bool v) noexcept { has_leading_space_ = v; }
+
+  /// \brief Lexes an #include header-name token from the current position.
+  ///
+  /// Skips leading horizontal whitespace (but not newlines), then, if the next
+  /// character opens a header name, scans a single kHeaderName token:
+  ///   * `<...>` — an h-char-sequence terminated by the first '>' on the line,
+  ///   * `"..."` — a q-char-sequence terminated by the first '"' on the line
+  ///     (backslashes are literal, not escapes).
+  /// The returned lexeme includes the surrounding delimiters.
+  ///
+  /// If the next character does not open a header name (for example a computed
+  /// include such as `#include MACRO`), this falls back to NextToken() so the
+  /// caller can macro-expand. Unterminated header names also fall back, letting
+  /// the caller diagnose the stray '<' or '"'.
+  Token LexIncludeFilename() noexcept;
+
  private:
   void InitializeTokenFlags() noexcept;
   void UpdateLexerState(TokenKind kind) noexcept;

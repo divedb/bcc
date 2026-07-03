@@ -94,6 +94,20 @@ class SourceManager {
   ///            correspond to a file SLocEntry.
   void SetMainFileID(FileID fid) noexcept { main_file_id_ = fid; }
 
+  /// \brief Records the effect of a \c #line directive.
+  ///
+  /// The override applies to source lines following the directive: the physical
+  /// line immediately after \p directive_loc is presumed to be \p line_num, and
+  /// subsequent lines count up from there. \p filename, if non-empty, overrides
+  /// the presumed filename as well.
+  ///
+  /// \param directive_loc A location on the \c #line directive's own line.
+  /// \param line_num      The line number asserted for the following line.
+  /// \param filename      Optional presumed-filename override; empty to keep
+  ///                      the current filename.
+  void AddLineDirective(SourceLocation directive_loc, unsigned line_num,
+                        std::string_view filename);
+
   /// \brief Returns the 1-based line number of \p loc.
   ///
   /// \p loc must already be a file location. Use GetSpellingLoc() or
