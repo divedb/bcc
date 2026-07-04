@@ -69,18 +69,25 @@ class Cursor {
   }
 
   bool IsLineSplice() const noexcept {
-    return current_ + 1 < end_ && current_[0] == '\\' && IsNewLine(current_[1]);
+    if (current_ >= end_ || current_[0] != '\\') return false;
+    // Clang accepts a backslash, optional horizontal whitespace, then a newline
+    // as a line splice (emitting a "backslash-newline separated by space"
+    // warning). The whitespace is part of the splice.
+    const char* p = current_ + 1;
+    while (p < end_ && (*p == ' ' || *p == '\t')) ++p;
+    return p < end_ && IsNewLine(*p);
   }
 
   /// \brief Skips consecutive C/C++ backslash-newline line splices.
   ///
   /// Removes one or more line splices starting at the current position.
-  /// A line splice consists of a backslash immediately followed by a
-  /// newline sequence:
+  /// A line splice consists of a backslash, optional horizontal whitespace,
+  /// and a newline sequence:
   ///
   ///   "\\\n"
   ///   "\\\r"
   ///   "\\\r\n"
+  ///   "\\<spaces>\n"   (extension)
   ///
   /// For example, given:
   ///
@@ -99,6 +106,9 @@ class Cursor {
 
     while (IsLineSplice()) {
       ++current_;
+
+      // Skip any horizontal whitespace between the backslash and newline.
+      while (current_ < end_ && (*current_ == ' ' || *current_ == '\t')) ++current_;
 
       if (*current_ == '\r') {
         ++current_;

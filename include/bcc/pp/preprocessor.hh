@@ -2,11 +2,13 @@
 
 #include <memory>
 #include <set>
+#include <functional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
 
+#include "bcc/basic/characteristic_kind.hh"
 #include "bcc/basic/file_id.hh"
 #include "bcc/basic/source_location.hh"
 #include "bcc/pp/identifier_table.hh"
@@ -134,6 +136,13 @@ class Preprocessor {
     return GetMacroInfo(ii) != nullptr;
   }
 
+  /// \brief Calls \p visitor once for each macro that is currently defined.
+  ///
+  /// Used by `-dM` (and `-dD`) to enumerate the final macro table. The visitor
+  /// receives the macro's name and its active MacroInfo. Order is unspecified.
+  void ForEachDefinedMacro(
+      std::function<void(const IdentifierInfo*, const MacroInfo*)> visitor) const;
+
   ScratchBuffer& GetScratchBuffer() noexcept { return scratch_; }
 
   /// \brief Checks if \p ii has been poisoned; if so, emits an error.
@@ -151,6 +160,19 @@ class Preprocessor {
   ///        if no file has been entered.
   FileID GetCurrentFileID() const noexcept {
     return cur_lexer_ ? cur_lexer_->GetFileID() : FileID{};
+  }
+
+  /// \brief The system-header characteristic of the file currently being lexed.
+  ///
+  /// Derived from HeaderSearch's per-file record: a file found on the angled
+  /// (system) search path, or promoted by `#pragma GCC system_header`, reports
+  /// kSystem. The main file and any file entered without a HeaderSearch report
+  /// kUser. Returns kUser while no file is current (e.g. mid macro expansion).
+  CharacteristicKind GetCurrentFileCharacteristic() const noexcept;
+
+  /// \brief Whether the file currently being lexed is a system header.
+  bool IsInSystemHeader() const noexcept {
+    return IsSystemHeader(GetCurrentFileCharacteristic());
   }
 
   /// \brief Depth of the #include stack, not counting the current file.
@@ -215,6 +237,11 @@ class Preprocessor {
   bool ExtractMacroHeaderName(MacroInfo* macro, std::string& filename,
                               bool& is_angled);
 
+  /// Interprets a macro-expanded token sequence as a #include header name
+  /// (a single string literal or a `<...>` group).
+  bool InterpretExpandedHeader(const std::vector<Token>& toks,
+                               std::string& filename, bool& is_angled);
+
   /// Common include logic shared by #include, #include_next, #import, and
   /// __include_macros. Returns true if the file was entered.
   bool HandleIncludeCommon(Token& include_tok, bool is_include_next, bool is_import,
@@ -243,6 +270,17 @@ class Preprocessor {
 
   /// Handles #pragma STDC FENV_ACCESS / FP_CONTRACT / CX_LIMITED_RANGE.
   void HandleSTDCPragma(Token& pragma_tok);
+
+  /// Handles #pragma message, #pragma GCC warning, and #pragma GCC error by
+  /// concatenating their (macro-expanded) string arguments and re-emitting the
+  /// pragma with a single re-encoded string, matching Clang's -E output.
+  void HandlePragmaMessageLike(const Token& pragma_tok, std::string_view kind,
+                               bool is_gcc);
+
+  /// Implements the _Pragma("...") operator: decodes the string and processes
+  /// it as a #pragma directive. Returns true if it was a _Pragma(...) call
+  /// (and thus the _Pragma token should not be emitted).
+  bool HandlePragmaOperator(Token& tok);
 
   /// Handles #pragma push_macro("name").
   void HandlePushMacroPragma();
@@ -307,6 +345,10 @@ class Preprocessor {
   /// expression, consuming the paren-delimited argument and returning a "0"
   /// or "1" numeric token.
   Token EvaluateHasExpression(Token& tok);
+
+  /// Reads and evaluates `__is_identifier(X)`: returns "1" if X is a plain
+  /// identifier in the current language (not a keyword), else "0".
+  Token EvaluateIsIdentifier(Token& tok);
 
   //===--------------------------------------------------------------------===//
   // Macro expansion (pp_macro_expansion.cc).
@@ -377,6 +419,11 @@ class Preprocessor {
   /// Discards the exhausted top token lexer and restores the lexer beneath it.
   void RemoveTopOfLexerStack();
 
+  /// \brief The system-header characteristic of the file lexed by \p lexer, or
+  ///        kUser if the file has no FileEntry (main / in-memory file) or no
+  ///        HeaderSearch is configured.
+  CharacteristicKind CharacteristicOf(const PPLexer* lexer) const noexcept;
+
   /// One suspended lexer on the stack. Exactly one of lexer / token_lexer is
   /// non-null, matching which callback was active.
   struct IncludeStackInfo {
@@ -444,6 +491,10 @@ class Preprocessor {
   IdentifierInfo* ident_timestamp_ = nullptr;
   IdentifierInfo* ident_flt_eval_method_ = nullptr;
   IdentifierInfo* ident_pragma_ = nullptr;
+  IdentifierInfo* ident_bitint_maxwidth_ = nullptr;
+  IdentifierInfo* ident_char16_type_ = nullptr;
+  IdentifierInfo* ident_char32_type_ = nullptr;
+  IdentifierInfo* ident_wchar_max_ = nullptr;
 
   /// Identifiers poisoned by `#pragma GCC poison`. A poisoned identifier may
   /// never be macro-expanded, used in `#ifdef`, `#if defined`, or appear as a

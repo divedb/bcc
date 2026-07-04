@@ -180,13 +180,18 @@ TEST_F(DirectiveTest, FltEvalMethodBuiltinIsZero) {
   EXPECT_EQ(Spellings("__FLT_EVAL_METHOD__\n"), (V{"0"}));
 }
 
-TEST_F(DirectiveTest, PragmaBuiltinIsPassedThrough) {
-  // _Pragma is a compiler builtin; during preprocessing it should be
-  // left as an identifier token (not expanded to a value).
-  std::vector<Token> toks = LexTokens("_Pragma(\"once\")\n");
+TEST_F(DirectiveTest, PragmaOperatorWithoutCallIsIdentifier) {
+  // A bare _Pragma (not followed by '(') is left as an identifier token.
+  std::vector<Token> toks = LexTokens("_Pragma\n");
   ASSERT_GE(toks.size(), 1u);
   EXPECT_EQ(toks[0].GetKind(), TokenKind::kIdentifier);
   EXPECT_EQ(toks[0].GetLexeme(), "_Pragma");
+}
+
+TEST_F(DirectiveTest, PragmaOperatorIsProcessed) {
+  // _Pragma("mark ...") is processed as a #pragma mark directive, which is
+  // consumed entirely (no tokens survive into the output stream).
+  EXPECT_EQ(Spellings("_Pragma(\"mark hi\")\nok\n"), (V{"ok"}));
 }
 
 //===----------------------------------------------------------------------===//
@@ -290,10 +295,13 @@ TEST_F(DirectiveTest, GccDependencyPragmaIsSilentlyAccepted) {
   EXPECT_EQ(diags_.NumErrors(), 0u);
 }
 
-TEST_F(DirectiveTest, GccDiagnosticPragmaIsSilentlyAccepted) {
-  EXPECT_EQ(Spellings("#pragma GCC diagnostic push\nok\n"), (V{"ok"}));
-  EXPECT_EQ(Spellings("#pragma GCC diagnostic pop\nok\n"), (V{"ok"}));
-  EXPECT_EQ(Spellings("#pragma GCC diagnostic error \"-Wfoo\"\nok\n"), (V{"ok"}));
+TEST_F(DirectiveTest, GccDiagnosticPragmaIsReemitted) {
+  // Like Clang's `clang -E -P`, #pragma GCC diagnostic survives into the
+  // preprocessed output (it is not silently consumed).
+  EXPECT_EQ(Spellings("#pragma GCC diagnostic push\nok\n"),
+            (V{"#", "pragma", "GCC", "diagnostic", "push", "ok"}));
+  EXPECT_EQ(Spellings("#pragma GCC diagnostic pop\nok\n"),
+            (V{"#", "pragma", "GCC", "diagnostic", "pop", "ok"}));
 }
 
 }  // namespace

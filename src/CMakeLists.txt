@@ -51,6 +51,7 @@ add_library(bcc_pp
   pp/header_search.cc
   pp/identifier_table.cc
   pp/macro_args.cc
+  pp/macro_print.cc
   pp/pp_directives.cc
   pp/pp_expressions.cc
   pp/pp_lexer.cc

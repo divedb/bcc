@@ -3,9 +3,9 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
-#include <regex>
 #include <sstream>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include "bcc/basic/diagnostic.hh"
@@ -27,26 +27,73 @@ namespace fs = std::filesystem;
 // outputs (line markers, whitespace, blank lines).
 // ---------------------------------------------------------------------------
 
-// Remove Clang/GCC-style linemarkers:  "# 1 "file.c" ..."
+// Remove Clang/GCC-style linemarkers:  "# N "file.c" ..." (one per line).
+// Hand-rolled to be binary-safe (std::regex is not NUL-safe).
 static std::string StripLineMarkers(const std::string& s) {
-  static const std::regex re(
-      "^# [0-9]+ \"[^\"]*\"( [0-9]+)?( [0-9]+)?( [0-9]+)?( [0-9]+)?\n",
-      std::regex::multiline);
-  return std::regex_replace(s, re, "");
+  std::string out;
+  std::size_t i = 0;
+  const std::size_t n = s.size();
+  while (i < n) {
+    // Find the end of the current line.
+    std::size_t e = s.find('\n', i);
+    std::size_t line_end = (e == std::string::npos) ? n : e;  // exclusive
+    // A line marker starts with "# <digits> ".
+    std::size_t p = i;
+    if (p < line_end && s[p] == '#') {
+      ++p;
+      if (p < line_end && s[p] == ' ') {
+        ++p;
+        std::size_t d = p;
+        while (d < line_end && s[d] >= '0' && s[d] <= '9') ++d;
+        if (d > p && d < line_end && s[d] == ' ') {
+          // It's a line marker; skip the whole line (and its newline).
+          i = (e == std::string::npos) ? n : e + 1;
+          continue;
+        }
+      }
+    }
+    out.append(s, i, line_end - i);
+    if (e != std::string::npos) out += '\n';
+    i = (e == std::string::npos) ? n : e + 1;
+  }
+  return out;
 }
 
-// Collapse runs of horizontal whitespace into a single space.
+// Collapse runs of horizontal whitespace into a single space. Binary-safe.
 static std::string CollapseHorizontalWS(const std::string& s) {
-  static const std::regex re("[ \t]+");
-  return std::regex_replace(s, re, " ");
+  std::string out;
+  out.reserve(s.size());
+  bool in_ws = false;
+  for (char c : s) {
+    if (c == ' ' || c == '\t') {
+      in_ws = true;
+    } else {
+      if (in_ws) {
+        out += ' ';
+        in_ws = false;
+      }
+      out += c;
+    }
+  }
+  if (in_ws) out += ' ';
+  return out;
 }
 
-// Collapse consecutive blank lines so differences in whitespace-only lines
-// between preprocessors (e.g. at file-transition boundaries) do not cause
-// spurious failures.
+// Collapse consecutive newlines into a single newline. Binary-safe.
 static std::string CollapseBlankLines(const std::string& s) {
-  static const std::regex re("\n{2,}");
-  return std::regex_replace(s, re, "\n");
+  std::string out;
+  out.reserve(s.size());
+  std::size_t i = 0;
+  const std::size_t n = s.size();
+  while (i < n) {
+    if (s[i] == '\n') {
+      out += '\n';
+      while (i < n && s[i] == '\n') ++i;
+    } else {
+      out += s[i++];
+    }
+  }
+  return out;
 }
 
 // Trim leading/trailing blank lines and trailing whitespace per line.
@@ -88,7 +135,12 @@ static std::string RunClang(const fs::path& file, const fs::path& inc_dir) {
   if (!pipe) return {};
   std::string result;
   char buf[4096];
-  while (fgets(buf, sizeof(buf), pipe)) result += buf;
+  // fread is binary-safe: fgets + std::string += (const char*) would truncate
+  // the captured output at the first NUL byte (e.g. NULs in string literals).
+  std::size_t n;
+  while ((n = std::fread(buf, 1, sizeof(buf), pipe)) > 0) {
+    result.append(buf, n);
+  }
   pclose(pipe);
   return Normalize(result);
 }
@@ -103,7 +155,10 @@ struct BccResult {
 };
 
 // Returns true if two adjacent tokens would merge into a different token
-// sequence when concatenated without any separator.
+// sequence when concatenated without any separator. Mirrors Clang's
+// AvoidConcat: a space is needed when the previous spelling extended by the
+// first character of the next forms a longer punctuator, or when two
+// identifier/number characters meet.
 static bool WouldMerge(const Token& prev, const Token& next) {
   std::string_view prev_spelling = prev.GetLexeme();
   std::string_view next_spelling = next.GetLexeme();
@@ -112,32 +167,67 @@ static bool WouldMerge(const Token& prev, const Token& next) {
   char p = prev_spelling.back();
   char n = next_spelling.front();
 
-  // Two identifier/number characters → would form a longer identifier/number.
+  // Two identifier/number characters -> a longer identifier/number.
   if ((std::isalnum(static_cast<unsigned char>(p)) || p == '_') &&
       (std::isalnum(static_cast<unsigned char>(n)) || n == '_'))
     return true;
 
-  // Digit after period → would form a number (e.g. `1 .2` → `1.2`).
+  // Digit after period -> a number (e.g. `1 .2` -> `1.2`).
   if (p == '.' && std::isdigit(static_cast<unsigned char>(n))) return true;
 
-  // Two-character punctuator merge (C / C++ standard tokens).
-  switch (p) {
-    case '+': if (n == '+' || n == '=') return true; break;
-    case '-': if (n == '-' || n == '=' || n == '>') return true; break;
-    case '<': if (n == '<' || n == '=') return true; break;
-    case '>': if (n == '>' || n == '=') return true; break;
-    case '=': if (n == '=') return true; break;
-    case '!': if (n == '=') return true; break;
-    case '&': if (n == '&' || n == '=') return true; break;
-    case '|': if (n == '|' || n == '=') return true; break;
-    case '*': if (n == '=') return true; break;
-    case '/': if (n == '/' || n == '*' || n == '=') return true; break;
-    case '%': if (n == '=') return true; break;
-    case '^': if (n == '=') return true; break;
-    case ':': if (n == ':') return true; break;
-    case '#': if (n == '#') return true; break;
+  // An encoding-prefix identifier immediately followed by a string/char
+  // literal would re-lex as a single prefixed literal.
+  if ((n == '"' || n == '\'') && !prev_spelling.empty()) {
+    std::string_view pre = prev_spelling;
+    if (pre == "L" || pre == "u" || pre == "U" || pre == "u8" ||
+        pre == "R" || pre == "LR" || pre == "uR" || pre == "UR" ||
+        pre == "u8R") {
+      return true;
+    }
   }
+
+  // Punctuator merge: does prev extended by the first char of next form a valid
+  // (longer) punctuator? This correctly avoids inserting a space between
+  // `<<` and `<<` (which stay two tokens) while inserting one between `<` and
+  // `<` (which would form `<<`).
+  static const std::unordered_set<std::string_view> kPunctuators = {
+      "<<=", ">>=", "...", "->", "++", "--", "<<", ">>", "<=", ">=", "==",
+      "!=", "&&", "||", "*=", "/=", "%=", "+=", "-=", "&=", "^=", "|=", "##"};
+  std::string cand;
+  cand.reserve(prev_spelling.size() + 1);
+  cand.append(prev_spelling);
+  cand.push_back(n);
+  if (kPunctuators.count(cand)) return true;
+
   return false;
+}
+
+// Strip backslash-newline line splices from a raw lexeme. Tokens that span a
+// splice carry kNeedsCleaning; clang -E joins them, so bcc must too.
+static std::string CleanLexeme(const Token& t) {
+  std::string_view raw = t.GetLexeme();
+  // Clang decodes \uXXXX/\UXXXXXXXX UCNs in identifier spellings when printing
+  // -E output; mirror that for identifier tokens.
+  if (t.GetKind() == TokenKind::kIdentifier && !t.NeedsCleaning()) {
+    return DecodeIdentifierUCNs(raw);
+  }
+  if (!t.NeedsCleaning()) return std::string(raw);
+  std::string out;
+  out.reserve(raw.size());
+  for (std::size_t i = 0; i < raw.size();) {
+    if (raw[i] == '\\' && i + 1 < raw.size()) {
+      std::size_t j = i + 1;
+      while (j < raw.size() && (raw[j] == ' ' || raw[j] == '\t')) ++j;
+      if (j < raw.size() && (raw[j] == '\n' || raw[j] == '\r')) {
+        char nl = raw[j];
+        i = j + 1;
+        if (nl == '\r' && i < raw.size() && raw[i] == '\n') ++i;
+        continue;
+      }
+    }
+    out += raw[i++];
+  }
+  return out;
 }
 
 static BccResult PreprocessWithBcc(const fs::path& file,
@@ -182,7 +272,7 @@ static BccResult PreprocessWithBcc(const fs::path& file,
       out += ' ';
     }
 
-    out.append(t.GetLexeme().data(), t.GetLexeme().size());
+    out.append(CleanLexeme(t));
     prev = std::move(t);
   }
 
@@ -203,15 +293,12 @@ class PreprocessorRegressionTest : public ::testing::TestWithParam<fs::path> {
     src_ = GetParam();
     rel_ = fs::relative(src_, fs::path(TEST_DATA_DIR));
 
-    // Copy the test file and any sibling .h/.def files into the temp dir.
+    // Copy the test file's whole source tree (siblings, the Inputs/ directory
+    // of helper headers, and sibling .c files that may be #included) into the
+    // temp dir so relative includes resolve identically for clang and bcc.
     fs::path src_dir = src_.parent_path();
-    for (auto& e : fs::directory_iterator(src_dir)) {
-      auto ext = e.path().extension();
-      if (ext == ".h" || ext == ".def" || e.path() == src_) {
-        fs::copy(e.path(), temp_dir_ / e.path().filename(),
-                 fs::copy_options::overwrite_existing);
-      }
-    }
+    fs::copy(src_dir, temp_dir_,
+             fs::copy_options::recursive | fs::copy_options::overwrite_existing);
   }
 
   void TearDown() override { fs::remove_all(temp_dir_); }
@@ -233,6 +320,33 @@ TEST_P(PreprocessorRegressionTest, OutputMatchesClang) {
 
   std::string clang_out = RunClang(test_file, temp_dir_);
 
+  if (bcc.output != clang_out && std::getenv("BCC_PP_DIFF")) {
+    std::cerr << "\n===== DIFF (clang <  bcc >) : " << rel_.string()
+              << " =====\n";
+    std::istringstream a(clang_out), b(bcc.output);
+    std::string la, lb;
+    unsigned ln = 1;
+    for (;;) {
+      bool ea = !std::getline(a, la);
+      bool eb = !std::getline(b, lb);
+      if (ea && eb) break;
+      if (ea) {
+        std::cerr << ln << " > " << lb << "\n";
+        continue;
+      }
+      if (eb) {
+        std::cerr << ln << " < " << la << "\n";
+        ln++;
+        continue;
+      }
+      if (la != lb) {
+        std::cerr << ln << " < " << la << "\n";
+        std::cerr << ln << " > " << lb << "\n";
+      }
+      ln++;
+    }
+    std::cerr << "===== END " << rel_.string() << " =====\n";
+  }
   EXPECT_EQ(bcc.output, clang_out);
 }
 
@@ -241,8 +355,13 @@ static auto DiscoverTests() {
   std::vector<fs::path> files;
   fs::path root(TEST_DATA_DIR);
   if (!fs::exists(root)) return files;
+  const char* filter = std::getenv("BCC_PP_FILTER");
   for (auto& entry : fs::recursive_directory_iterator(root)) {
-    if (entry.path().extension() == ".c") files.push_back(entry.path());
+    if (entry.path().extension() == ".c") {
+      if (filter == nullptr ||
+          entry.path().string().find(filter) != std::string::npos)
+        files.push_back(entry.path());
+    }
   }
   std::sort(files.begin(), files.end());
   return files;

@@ -40,6 +40,7 @@ add_executable(bcc_pp_test
   unittest/pp/identifier_table_test.cc
   unittest/pp/include_test.cc
   unittest/pp/macro_expansion_test.cc
+  unittest/pp/macro_print_test.cc
   unittest/pp/pp_client_test.cc
   unittest/pp/pp_lexer_test.cc
   unittest/pp/preprocessor_test.cc

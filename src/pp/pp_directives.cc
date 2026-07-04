@@ -1,3 +1,5 @@
+#include <cctype>
+#include <cstdio>
 #include <string>
 #include <string_view>
 
@@ -21,6 +23,81 @@ const char* ElifKeywordName(PPKeyword kw) {
     case PPKeyword::kElifndef: return "elifndef";
     default: return "elif";
   }
+}
+
+// Decodes a string-literal lexeme (with quotes and escapes) to its raw byte
+// content. Used by #pragma message/GCC warning/GCC error to concatenate and
+// re-encode their string arguments the way Clang's -E output does.
+std::string DecodeStringLiteralBytes(std::string_view lexeme) {
+  std::string out;
+  std::size_t i = 0;
+  // Skip an encoding prefix (u8, u, U, L).
+  while (i < lexeme.size() && lexeme[i] != '"') ++i;
+  ++i;  // past opening quote
+  for (; i < lexeme.size() && lexeme[i] != '"'; ++i) {
+    if (lexeme[i] != '\\') {
+      out += lexeme[i];
+      continue;
+    }
+    ++i;  // consume backslash
+    if (i >= lexeme.size()) break;
+    char e = lexeme[i];
+    auto hexdigit = [](char c) {
+      if (c >= '0' && c <= '9') return c - '0';
+      if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+      return c - 'A' + 10;
+    };
+    switch (e) {
+      case 'n': out += '\n'; break;
+      case 't': out += '\t'; break;
+      case 'r': out += '\r'; break;
+      case '0': case '1': case '2': case '3':
+      case '4': case '5': case '6': case '7': {
+        int v = e - '0';
+        int count = 1;
+        while (count < 3 && i + 1 < lexeme.size() && lexeme[i + 1] >= '0' &&
+               lexeme[i + 1] <= '7') {
+          v = v * 8 + (lexeme[++i] - '0');
+          ++count;
+        }
+        out += static_cast<char>(v);
+        break;
+      }
+      case 'x': {
+        int v = 0;
+        while (i + 1 < lexeme.size() && std::isxdigit(
+                   static_cast<unsigned char>(lexeme[i + 1]))) {
+          v = v * 16 + hexdigit(lexeme[++i]);
+        }
+        out += static_cast<char>(v);
+        break;
+      }
+      default: out += e; break;
+    }
+  }
+  return out;
+}
+
+// Re-encodes raw bytes the way Clang prints a #pragma message/warning/error
+// string: backslash, double-quote, and non-printable bytes become 3-digit
+// octal escapes; everything else is literal. The result does NOT include the
+// surrounding quotes.
+std::string EncodePragmaMessageBytes(std::string_view bytes) {
+  std::string out;
+  for (unsigned char b : bytes) {
+    if (b == '\\') {
+      out += "\\134";
+    } else if (b == '"') {
+      out += "\\042";
+    } else if (b < 0x20 || b == 0x7f) {
+      char buf[5];
+      std::snprintf(buf, sizeof(buf), "\\%03o", b);
+      out += buf;
+    } else {
+      out += static_cast<char>(b);
+    }
+  }
+  return out;
 }
 
 }  // namespace
@@ -280,41 +357,46 @@ bool Preprocessor::HandleIncludeCommon(Token& include_tok, bool is_include_next,
 
   std::string filename;
   bool is_angled = false;
+  bool consumed_to_eod = false;
 
   if (filename_tok.GetKind() == TokenKind::kHeaderName) {
     std::string_view raw = filename_tok.GetLexeme();
     is_angled = raw.front() == '<';
     filename = std::string(raw.substr(1, raw.size() - 2));
-  } else if (filename_tok.GetKind() == TokenKind::kIdentifier) {
-    IdentifierInfo* ii = LookUpIdentifierInfo(filename_tok);
-    if (MacroInfo* macro = GetMacroInfo(ii)) {
-      if (!macro->IsFunctionLike() &&
-          ExtractMacroHeaderName(macro, filename, is_angled)) {
-      } else {
-        diags_.Report(filename_tok.GetLocation(),
-                      diag::err_pp_expected_filename);
-        DiscardUntilEndOfDirective();
-        return false;
+  } else if (filename_tok.GetKind() == TokenKind::kEod ||
+             filename_tok.GetKind() == TokenKind::kEOF) {
+    diags_.Report(filename_tok.GetLocation(), diag::err_pp_expected_filename);
+    return false;
+  } else {
+    // Computed include: macro-expand the rest of the directive line and
+    // interpret the result as a header name. Handles `#include MACRO`,
+    // `#include __FILE__`, and `#include FOO(...)`.
+    std::vector<Token> toks;
+    toks.push_back(filename_tok);
+    for (;;) {
+      Token t = cur_lexer_->Lex();
+      if (t.GetKind() == TokenKind::kEod || t.GetKind() == TokenKind::kEOF) break;
+      toks.push_back(t);
+    }
+    consumed_to_eod = true;
+    // Attach IdentifierInfo so ExpandArgument can macro-expand each token
+    // (e.g. __FILE__, or a function-like macro invocation).
+    for (Token& t : toks) {
+      if (t.GetKind() == TokenKind::kIdentifier &&
+          t.GetIdentifierInfo() == nullptr) {
+        LookUpIdentifierInfo(t);
       }
-    } else {
-      diags_.Report(filename_tok.GetLocation(),
-                    diag::err_pp_expected_filename);
-      if (filename_tok.GetKind() != TokenKind::kEod &&
-          filename_tok.GetKind() != TokenKind::kEOF) {
-        DiscardUntilEndOfDirective();
-      }
+    }
+    std::vector<Token> expanded = ExpandArgument(toks);
+    if (!InterpretExpandedHeader(expanded, filename, is_angled)) {
+      diags_.Report(filename_tok.GetLocation(), diag::err_pp_expected_filename);
       return false;
     }
-  } else {
-    diags_.Report(filename_tok.GetLocation(), diag::err_pp_expected_filename);
-    if (filename_tok.GetKind() != TokenKind::kEod &&
-        filename_tok.GetKind() != TokenKind::kEOF) {
-      DiscardUntilEndOfDirective();
-    }
-    return false;
   }
 
-  DiscardUntilEndOfDirective();
+  if (!consumed_to_eod) {
+    DiscardUntilEndOfDirective();
+  }
 
   if (filename.empty()) {
     diags_.Report(filename_tok.GetLocation(), diag::err_pp_empty_filename);
@@ -331,8 +413,11 @@ bool Preprocessor::HandleIncludeCommon(Token& include_tok, bool is_include_next,
   }
 
   if (callbacks_) {
+    CharacteristicKind file_type =
+        (header_search_ && fe) ? header_search_->GetFileCharacteristic(fe)
+                               : CharacteristicKind::kUser;
     callbacks_->InclusionDirective(include_tok.GetLocation(), filename,
-                                   is_angled, fe);
+                                   is_angled, fe, file_type);
   }
 
   if (fe == nullptr) {
@@ -426,6 +511,46 @@ bool Preprocessor::ExtractMacroHeaderName(MacroInfo* macro,
   return false;
 }
 
+// Interprets a (macro-expanded) token sequence as a #include header name:
+//   * a single string literal  ->  "file"   (quoted)
+//   * "<" ... ">"              ->  <file>   (angled)
+// Returns false (leaving \p filename empty) if neither shape matches.
+bool Preprocessor::InterpretExpandedHeader(const std::vector<Token>& toks,
+                                           std::string& filename,
+                                           bool& is_angled) {
+  if (toks.empty()) return false;
+
+  // Drop a trailing Eod/EOF if ExpandArgument left one.
+  std::size_t n = toks.size();
+  while (n > 0 && (toks[n - 1].GetKind() == TokenKind::kEod ||
+                   toks[n - 1].GetKind() == TokenKind::kEOF)) {
+    --n;
+  }
+  if (n == 0) return false;
+
+  if (n == 1 && IsStringLiteralKind(toks[0].GetKind())) {
+    std::string_view raw = toks[0].GetLexeme();
+    // Skip an encoding prefix to find the opening quote.
+    std::size_t q = raw.find('"');
+    if (q == std::string_view::npos) return false;
+    filename = std::string(raw.substr(q + 1, raw.size() - q - 2));
+    is_angled = false;
+    return true;
+  }
+
+  if (n >= 2 && toks[0].GetKind() == TokenKind::kLess &&
+      toks[n - 1].GetKind() == TokenKind::kGreater) {
+    filename.clear();
+    for (std::size_t i = 1; i + 1 < n; ++i) {
+      filename += toks[i].GetLexeme();
+    }
+    is_angled = true;
+    return true;
+  }
+
+  return false;
+}
+
 void Preprocessor::HandleIdentDirective(Token& /*ident_tok*/) {
   // #ident / #sccs: silently discard the rest of the line.
   // These are used to embed .comment section strings in ELF, but on non-ELF
@@ -456,9 +581,17 @@ void Preprocessor::HandlePragmaDirective(Token& pragma_tok) {
     return;
   }
 
-  // Recognised namespace prefixes.
+  // Editor-only / no-op pragmas that Clang consumes entirely (no -E output).
   if (tok.GetKind() == TokenKind::kIdentifier) {
     std::string_view ns = LookUpIdentifierInfo(tok)->GetName();
+    if (ns == "mark" || ns == "region" || ns == "endregion") {
+      DiscardUntilEndOfDirective();
+      return;
+    }
+    if (ns == "message") {
+      HandlePragmaMessageLike(pragma_tok, "message", /*is_gcc=*/false);
+      return;
+    }
     if (ns == "GCC" || ns == "clang") {
       HandleGCCOrClangPragma(pragma_tok, tok);
       return;
@@ -518,6 +651,15 @@ void Preprocessor::HandleGCCOrClangPragma(Token& pragma_tok, Token& ns_tok) {
 
   // #pragma GCC system_header / #pragma clang system_header
   if (sub_name == "system_header") {
+    // Promote the current file to a system header from this point on. For a
+    // file-backed header this is recorded in HeaderSearch so that later
+    // lookups, the InclusionDirective callback, and IsInSystemHeader() all see
+    // it; GetCurrentFileCharacteristic() reads the same record.
+    if (header_search_ != nullptr) {
+      if (const FileEntry* fe = cur_lexer_->GetFileEntry()) {
+        header_search_->MarkFileAsSystemHeader(fe);
+      }
+    }
     DiscardUntilEndOfDirective();
     return;
   }
@@ -528,14 +670,216 @@ void Preprocessor::HandleGCCOrClangPragma(Token& pragma_tok, Token& ns_tok) {
     return;
   }
 
-  // #pragma GCC diagnostic / #pragma clang diagnostic
+  // #pragma GCC diagnostic / #pragma clang diagnostic: re-emit verbatim so the
+  // directive survives -E (Clang prints it in preprocessed output).
   if (sub_name == "diagnostic") {
-    HandlePragmaDiagnostic();
+    std::vector<Token> out;
+    const char* hash_data = nullptr;
+    SourceLocation hash_loc = scratch_.GetToken("#", hash_data);
+    out.emplace_back(hash_loc, TokenKind::kHash, hash_data, 1u,
+                     TokenFlag::kStartOfLine);
+    const char* pragma_data = nullptr;
+    SourceLocation pragma_loc = scratch_.GetToken("pragma", pragma_data);
+    Token pragma_t(pragma_loc, TokenKind::kIdentifier, pragma_data, 6u,
+                   TokenFlag::kNone);
+    LookUpIdentifierInfo(pragma_t);
+    out.push_back(pragma_t);
+    ns_tok.SetFlag(TokenFlag::kLeadingSpace);
+    out.push_back(ns_tok);
+    sub.SetFlag(TokenFlag::kLeadingSpace);
+    out.push_back(sub);
+    for (;;) {
+      Token next = cur_lexer_->Lex();
+      if (next.GetKind() == TokenKind::kEod ||
+          next.GetKind() == TokenKind::kEOF)
+        break;
+      out.push_back(next);
+    }
+    EnterTokenStream(std::move(out));
+    return;
+  }
+
+  // #pragma GCC warning / #pragma GCC error: re-emit with a single string.
+  if (sub_name == "warning") {
+    HandlePragmaMessageLike(pragma_tok, "warning", /*is_gcc=*/true);
+    return;
+  }
+  if (sub_name == "error") {
+    HandlePragmaMessageLike(pragma_tok, "error", /*is_gcc=*/true);
     return;
   }
 
   // Unknown sub-pragma: consume and ignore.
   DiscardUntilEndOfDirective();
+}
+
+void Preprocessor::HandlePragmaMessageLike(const Token& pragma_tok,
+                                           std::string_view kind,
+                                           bool is_gcc) {
+  // Read (macro-expanded) the rest of the directive line.
+  bool paren_form = false;
+  std::string concatenated;
+  bool invalid = false;
+  bool seen_string = false;
+  int paren_depth = 0;
+
+  for (;;) {
+    Token t = LexDirectiveToken();
+    if (t.GetKind() == TokenKind::kEod || t.GetKind() == TokenKind::kEOF) break;
+
+    if (t.GetKind() == TokenKind::kLParen) {
+      if (paren_depth == 0 && !seen_string) paren_form = true;
+      ++paren_depth;
+      continue;
+    }
+    if (t.GetKind() == TokenKind::kRParen) {
+      if (paren_depth > 0) --paren_depth;
+      continue;
+    }
+
+    if (IsStringLiteralKind(t.GetKind())) {
+      concatenated += DecodeStringLiteralBytes(t.GetLexeme());
+      seen_string = true;
+      continue;
+    }
+
+    invalid = true;
+  }
+
+  // Malformed pragma (no string, a stray non-string token, or unbalanced
+  // parens): consume quietly, matching Clang (which emits a diagnostic but no
+  // -E output).
+  if (invalid || !seen_string || paren_depth != 0) {
+    return;
+  }
+
+  std::string encoded = EncodePragmaMessageBytes(concatenated);
+  std::string quoted = "\"" + encoded + "\"";
+
+  // Build the re-emitted token sequence: `#pragma [GCC] <kind> [<string>]`,
+  // or `#pragma message(<string>)` when the message form used parens.
+  std::vector<Token> out;
+  const char* hash_data = nullptr;
+  SourceLocation hash_loc = scratch_.GetToken("#", hash_data);
+  out.emplace_back(hash_loc, TokenKind::kHash, hash_data, 1u,
+                   TokenFlag::kStartOfLine);
+
+  const char* pragma_data = nullptr;
+  SourceLocation pragma_loc = scratch_.GetToken("pragma", pragma_data);
+  Token pragma_t(pragma_loc, TokenKind::kIdentifier, pragma_data, 6u,
+                 TokenFlag::kNone);
+  LookUpIdentifierInfo(pragma_t);
+  out.push_back(pragma_t);
+
+  if (is_gcc) {
+    const char* gcc_data = nullptr;
+    SourceLocation gcc_loc = scratch_.GetToken("GCC", gcc_data);
+    Token gcc_t(gcc_loc, TokenKind::kIdentifier, gcc_data, 3u,
+                TokenFlag::kLeadingSpace);
+    LookUpIdentifierInfo(gcc_t);
+    out.push_back(gcc_t);
+  }
+
+  const char* kind_data = nullptr;
+  SourceLocation kind_loc = scratch_.GetToken(kind, kind_data);
+  Token kind_t(kind_loc, TokenKind::kIdentifier, kind_data,
+               static_cast<uint32_t>(kind.size()), TokenFlag::kLeadingSpace);
+  LookUpIdentifierInfo(kind_t);
+  out.push_back(kind_t);
+
+  const char* str_data = nullptr;
+  SourceLocation str_loc = scratch_.GetToken(quoted, str_data);
+  Token str_t(str_loc, TokenKind::kStringLiteral, str_data,
+              static_cast<uint32_t>(quoted.size()), TokenFlag::kNone);
+
+  if (!is_gcc) {
+    // `#pragma message` always re-emits as `message("<s>")`.
+    const char* lp_data = nullptr;
+    SourceLocation lp_loc = scratch_.GetToken("(", lp_data);
+    out.emplace_back(lp_loc, TokenKind::kLParen, lp_data, 1u, TokenFlag::kNone);
+    out.push_back(str_t);
+    const char* rp_data = nullptr;
+    SourceLocation rp_loc = scratch_.GetToken(")", rp_data);
+    out.emplace_back(rp_loc, TokenKind::kRParen, rp_data, 1u, TokenFlag::kNone);
+  } else {
+    str_t.SetFlag(TokenFlag::kLeadingSpace);
+    out.push_back(str_t);
+  }
+
+  EnterTokenStream(std::move(out));
+}
+
+bool Preprocessor::HandlePragmaOperator(Token& tok) {
+  // Must be followed by '(' ... ')'.
+  Token open{SourceLocation{}, TokenKind::kUnknown, nullptr, 0u};
+  LexUnexpandedToken(open);
+  if (open.GetKind() != TokenKind::kLParen) {
+    if (open.GetKind() != TokenKind::kEOF && open.GetKind() != TokenKind::kEod) {
+      EnterTokenStream(std::vector<Token>{open});
+    }
+    return false;  // not a _Pragma(...) call: emit _Pragma as an identifier.
+  }
+
+  // Collect the parenthesised argument without expanding it, then fully expand
+  // it (the operand of _Pragma is macro-expanded, e.g. _Pragma(STRINGIFY(x))).
+  std::vector<Token> arg;
+  int depth = 1;
+  for (;;) {
+    Token t{SourceLocation{}, TokenKind::kUnknown, nullptr, 0u};
+    LexUnexpandedToken(t);
+    if (t.GetKind() == TokenKind::kEOF || t.GetKind() == TokenKind::kEod) break;
+    if (t.GetKind() == TokenKind::kLParen) {
+      ++depth;
+      arg.push_back(t);
+      continue;
+    }
+    if (t.GetKind() == TokenKind::kRParen) {
+      --depth;
+      if (depth == 0) break;
+      arg.push_back(t);
+      continue;
+    }
+    arg.push_back(t);
+  }
+
+  std::vector<Token> expanded = ExpandArgument(arg);
+  const Token* str = nullptr;
+  for (const Token& t : expanded) {
+    if (IsStringLiteralKind(t.GetKind())) {
+      str = &t;
+      break;
+    }
+  }
+  if (str == nullptr) {
+    return true;  // malformed: consume silently.
+  }
+
+  std::string decoded = DecodeStringLiteralBytes(str->GetLexeme());
+  std::string src = "#pragma " + decoded + "\n";
+
+  FileID fid = sm_.CreateFileID("<_Pragma>", src, tok.GetLocation());
+  auto pragma_lexer = std::make_unique<PPLexer>(sm_, fid, &diags_);
+
+  std::unique_ptr<PPLexer> saved = std::move(cur_lexer_);
+  cur_lexer_ = std::move(pragma_lexer);
+
+  Token hash = cur_lexer_->Lex();
+  if (hash.GetKind() == TokenKind::kHash && hash.IsStartOfLine()) {
+    HandleDirective(hash);
+  }
+
+  // Restore the real file lexer. If the pragma re-emitted tokens, the scratch
+  // lexer was pushed onto the include stack — replace it there so the stream
+  // resumes into the real file.
+  if (cur_token_lexer_) {
+    if (!include_macro_stack_.empty()) {
+      include_macro_stack_.back().lexer = std::move(saved);
+    }
+    cur_lexer_.reset();
+  } else {
+    cur_lexer_ = std::move(saved);
+  }
+  return true;
 }
 
 void Preprocessor::HandlePragmaPoison(Token& /*pragma_tok*/) {

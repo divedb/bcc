@@ -5,6 +5,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include "bcc/basic/characteristic_kind.hh"
+
 namespace bcc {
 
 class FileEntry;
@@ -21,13 +23,20 @@ class IdentifierInfo;
 struct HeaderFileInfo {
   /// The file contains `#pragma once`; it must never be entered again.
   bool is_pragma_once = false;
+
   /// The file was `#import`ed; a subsequent #import of the same file is
   /// a no-op (even without an include guard or #pragma once).
   bool is_imported = false;
+
   /// The controlling macro of the file's `#ifndef` include guard, or nullptr if
   /// the file has no recognized guard. When this macro is #defined, entering
   /// the file is known to produce no tokens.
   const IdentifierInfo* controlling_macro = nullptr;
+
+  /// The file's system-header characteristic, learned from the search-path tier
+  /// that resolved it (system paths -> kSystem) and overridable to kSystem by
+  /// `#pragma GCC system_header`. Mirrors Clang's HeaderFileInfo::DirInfo.
+  CharacteristicKind file_characteristic = CharacteristicKind::kUser;
 };
 
 /// \brief Resolves #include filenames against an ordered list of search
@@ -106,6 +115,30 @@ class HeaderSearch {
   /// \brief Marks \p fe as imported via `#import`.
   void SetFileImported(const FileEntry* fe) {
     file_info_[fe].is_imported = true;
+  }
+
+  //===--------------------------------------------------------------------===//
+  // System-header characteristic.
+  //===--------------------------------------------------------------------===//
+
+  /// \brief Returns the system-header characteristic recorded for \p fe.
+  ///
+  /// A file found on the angled (system) search path reports kSystem; one found
+  /// via the includer's directory or the quoted search list reports kUser
+  /// unless `#pragma GCC system_header` (see MarkFileAsSystemHeader) has since
+  /// promoted it. Returns kUser for a file with no recorded info (e.g. the main
+  /// file, or \p fe null).
+  CharacteristicKind GetFileCharacteristic(const FileEntry* fe) const {
+    if (const HeaderFileInfo* info = GetExistingFileInfo(fe)) {
+      return info->file_characteristic;
+    }
+    return CharacteristicKind::kUser;
+  }
+
+  /// \brief Promotes \p fe to a system header, as if by
+  ///        `#pragma GCC system_header`.
+  void MarkFileAsSystemHeader(const FileEntry* fe) {
+    file_info_[fe].file_characteristic = CharacteristicKind::kSystem;
   }
 
  private:

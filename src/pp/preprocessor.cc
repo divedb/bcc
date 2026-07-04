@@ -103,7 +103,8 @@ void Preprocessor::EnterSourceFileWithLexer(std::unique_ptr<PPLexer> lexer) {
 
   if (callbacks_) {
     callbacks_->FileChanged(sm_.GetLocForStartOfFile(cur_lexer_->GetFileID()),
-                            PPCallbacks::FileChangeReason::kEnterFile, prev_fid);
+                            PPCallbacks::FileChangeReason::kEnterFile, prev_fid,
+                            CharacteristicOf(cur_lexer_.get()));
   }
 }
 
@@ -159,9 +160,10 @@ void Preprocessor::RemoveTopOfLexerStack() {
   // should flow through to the next source token (e.g. `EMPTY;` with leading
   // space before EMPTY → the `;` inherits it).
   bool restore_leading = false;
-  if (cur_token_lexer_ && cur_token_lexer_->NumTokens() == 0 &&
-      !cur_token_lexer_->IsStream()) {
-    restore_leading = cur_token_lexer_->FirstTokenHasLeadingSpace();
+  bool restore_sol = false;
+  if (cur_token_lexer_ && !cur_token_lexer_->IsStream()) {
+    restore_leading = cur_token_lexer_->HasUnconsumedLeadingSpace();
+    restore_sol = cur_token_lexer_->HasUnconsumedStartOfLine();
   }
 
   // Destroy the exhausted token lexer first: its destructor re-enables the
@@ -169,8 +171,15 @@ void Preprocessor::RemoveTopOfLexerStack() {
   cur_token_lexer_.reset();
   PopIncludeMacroStack();
 
-  if (restore_leading && cur_lexer_) {
-    cur_lexer_->SetHasLeadingSpace(true);
+  if (restore_leading) {
+    if (cur_token_lexer_) {
+      cur_token_lexer_->InheritLeadingSpaceForNext();
+    } else if (cur_lexer_) {
+      cur_lexer_->SetHasLeadingSpace(true);
+    }
+  }
+  if (restore_sol && cur_token_lexer_) {
+    cur_token_lexer_->InheritStartOfLineForNext();
   }
 }
 
@@ -315,7 +324,7 @@ bool Preprocessor::HandleEndOfFile(const Token& eof_tok, Token& result) {
     if (callbacks_ && cur_lexer_) {
       callbacks_->FileChanged(sm_.GetLocForStartOfFile(cur_lexer_->GetFileID()),
                               PPCallbacks::FileChangeReason::kExitFile,
-                              exited_fid);
+                              exited_fid, CharacteristicOf(cur_lexer_.get()));
     }
     return false;
   }
@@ -338,6 +347,18 @@ IdentifierInfo* Preprocessor::LookUpIdentifierInfo(Token& tok) {
   // (kIdentifier -> kIdentifier) otherwise.
   tok.SetKind(info->GetTokenKind());
   return info;
+}
+
+CharacteristicKind Preprocessor::CharacteristicOf(
+    const PPLexer* lexer) const noexcept {
+  if (header_search_ == nullptr || lexer == nullptr) {
+    return CharacteristicKind::kUser;
+  }
+  return header_search_->GetFileCharacteristic(lexer->GetFileEntry());
+}
+
+CharacteristicKind Preprocessor::GetCurrentFileCharacteristic() const noexcept {
+  return CharacteristicOf(cur_lexer_.get());
 }
 
 }  // namespace bcc

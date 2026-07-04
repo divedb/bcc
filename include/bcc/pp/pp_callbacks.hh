@@ -2,6 +2,7 @@
 
 #include <string_view>
 
+#include "bcc/basic/characteristic_kind.hh"
 #include "bcc/basic/file_id.hh"
 #include "bcc/basic/source_location.hh"
 
@@ -32,13 +33,16 @@ class PPCallbacks {
 
   /// Called when lexing moves to a different source file.
   ///
-  /// \param loc      Start of the newly-current file (kEnterFile), or the
-  ///                 location resumed in the includer (kExitFile).
-  /// \param reason   Whether a file was entered or exited.
-  /// \param prev_fid The file being left (kExitFile) or the includer
-  ///                 (kEnterFile); invalid for the main file.
+  /// \param loc       Start of the newly-current file (kEnterFile), or the
+  ///                  location resumed in the includer (kExitFile).
+  /// \param reason    Whether a file was entered or exited.
+  /// \param prev_fid  The file being left (kExitFile) or the includer
+  ///                  (kEnterFile); invalid for the main file.
+  /// \param file_type The system-header characteristic of the file lexing has
+  ///                  moved to (the entered file on kEnterFile, the resumed
+  ///                  includer on kExitFile).
   virtual void FileChanged(SourceLocation loc, FileChangeReason reason,
-                           FileID prev_fid) {}
+                            FileID prev_fid, CharacteristicKind file_type) {}
 
   /// Called for an #include once its filename has been resolved.
   ///
@@ -46,9 +50,13 @@ class PPCallbacks {
   /// \param filename    The header name without its delimiters.
   /// \param is_angled   True for <...>, false for "...".
   /// \param file        The resolved file, or nullptr if not found.
+  /// \param file_type   The system-header characteristic of \p file when found
+  ///                    (derived from the search-path tier that resolved it);
+  ///                    kUser when \p file is null.
   virtual void InclusionDirective(SourceLocation hash_loc,
                                   std::string_view filename, bool is_angled,
-                                  const FileEntry* file) {}
+                                  const FileEntry* file,
+                                  CharacteristicKind file_type) {}
 
   /// Called when a macro is #defined.
   virtual void MacroDefined(const IdentifierInfo* name, const MacroInfo* macro) {

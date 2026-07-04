@@ -68,6 +68,15 @@ MacroInfo* Preprocessor::GetMacroInfo(const IdentifierInfo* ii) const {
   return md->IsDefinition() ? md->GetMacroInfo() : nullptr;
 }
 
+void Preprocessor::ForEachDefinedMacro(
+    std::function<void(const IdentifierInfo*, const MacroInfo*)> visitor) const {
+  for (const auto& [ii, md] : macros_) {
+    if (md != nullptr && md->IsDefinition() && md->GetMacroInfo() != nullptr) {
+      visitor(ii, md->GetMacroInfo());
+    }
+  }
+}
+
 //===----------------------------------------------------------------------===//
 // Builtin macros
 //===----------------------------------------------------------------------===//
@@ -96,6 +105,10 @@ void Preprocessor::RegisterBuiltinMacros() {
   ident_timestamp_      = RegisterBuiltin("__TIMESTAMP__");
   ident_flt_eval_method_ = RegisterBuiltin("__FLT_EVAL_METHOD__");
   ident_pragma_         = RegisterBuiltin("_Pragma");
+  ident_bitint_maxwidth_ = RegisterBuiltin("__BITINT_MAXWIDTH__");
+  ident_char16_type_    = RegisterBuiltin("__CHAR16_TYPE__");
+  ident_char32_type_    = RegisterBuiltin("__CHAR32_TYPE__");
+  ident_wchar_max_      = RegisterBuiltin("__WCHAR_MAX__");
 }
 
 namespace {
@@ -185,6 +198,16 @@ void Preprocessor::ExpandBuiltinMacro(Token& tok) {
     }
   } else if (ii == ident_flt_eval_method_) {
     spelling = "0";
+  } else if (ii == ident_bitint_maxwidth_) {
+    spelling = "8388608";
+  } else if (ii == ident_char16_type_) {
+    kind = TokenKind::kIdentifier;
+    spelling = "unsigned short";
+  } else if (ii == ident_char32_type_) {
+    kind = TokenKind::kIdentifier;
+    spelling = "unsigned int";
+  } else if (ii == ident_wchar_max_) {
+    spelling = "0x7fffffff";
   } else if (ii == ident_pragma_) {
     return;
   } else {
@@ -216,6 +239,43 @@ bool Preprocessor::HandleIdentifier(Token& tok) {
     // Do not expand; the token is still produced.
     return false;
   }
+
+  // _Pragma("...") operator: evaluate wherever it appears.
+  if (ii == ident_pragma_) {
+    if (HandlePragmaOperator(tok)) {
+      return true;  // consumed; re-dispatch for any re-emitted tokens.
+    }
+    // Not a call: fall through and emit _Pragma as a plain identifier.
+  }
+
+  // __has_builtin / __has_attribute / __has_feature / __has_extension /
+  // __is_identifier are operator-like builtins that evaluate wherever they
+  // appear (not only inside #if), matching Clang.
+  if (ii != nullptr) {
+    PPKeyword kw = ii->GetPPKeyword();
+    if (kw == PPKeyword::kHasBuiltin || kw == PPKeyword::kHasAttribute ||
+        kw == PPKeyword::kHasFeature || kw == PPKeyword::kHasExtension ||
+        kw == PPKeyword::kIsIdentifier) {
+      Token next{SourceLocation{}, TokenKind::kUnknown, nullptr, 0u};
+      LexUnexpandedToken(next);
+      bool is_call = (next.GetKind() == TokenKind::kLParen);
+      // Push the peeked token back so the evaluator (or the normal path) sees
+      // it. An EOF/Eod sentinel is idempotent and need not be requeued.
+      if (next.GetKind() != TokenKind::kEOF && next.GetKind() != TokenKind::kEod) {
+        EnterTokenStream(std::vector<Token>{next});
+      }
+      if (is_call) {
+        if (kw == PPKeyword::kIsIdentifier) {
+          tok = EvaluateIsIdentifier(tok);
+        } else {
+          tok = EvaluateHasExpression(tok);
+        }
+        return false;  // tok rewritten in place; emit it.
+      }
+      // Not a call: fall through to ordinary handling.
+    }
+  }
+
   return TryExpandMacro(tok);
 }
 
@@ -468,8 +528,19 @@ bool TokenLexer::Lex(Token& result) {
       } else {
         tok.ClearFlag(TokenFlag::kLeadingSpace);
       }
+    } else if (inherit_leading_space_) {
+      // A nested expansion that had a leading space expanded to nothing:
+      // that space flows onto this token.
+      tok.SetFlag(TokenFlag::kLeadingSpace);
     }
+  } else if (inherit_leading_space_) {
+    tok.SetFlag(TokenFlag::kLeadingSpace);
   }
+  if (inherit_start_of_line_) {
+    tok.SetFlag(TokenFlag::kStartOfLine);
+  }
+  inherit_leading_space_ = false;
+  inherit_start_of_line_ = false;
 
   ++cur_token_;
   result = tok;
@@ -496,6 +567,11 @@ void TokenLexer::BuildExpansion(MacroArgs* args) {
       int pidx = ParameterIndex(body[i + 1]);
       if (pidx >= 0) {
         Token s = StringifyArgument(args->GetUnexpArgument(pidx));
+        // The stringized result inherits the '#' token's whitespace flags so
+        // spacing around the operator is preserved (e.g. `, #name`).
+        if (cur.HasLeadingSpace()) {
+          s.SetFlag(TokenFlag::kLeadingSpace);
+        }
         AppendOrPaste(owned_tokens_, std::vector<Token>{s}, pending_paste);
         pending_paste = false;
         ++i;  // consume the parameter
@@ -503,9 +579,12 @@ void TokenLexer::BuildExpansion(MacroArgs* args) {
       }
     }
 
-    // Paste operator between two operands.
-    if (cur.GetKind() == TokenKind::kHashHash && !owned_tokens_.empty() &&
-        i + 1 < body.size()) {
+    // Paste operator between two operands. The left operand may be an empty
+    // (placemarker) argument — in that case owned_tokens_ has nothing appended
+    // for it, but "##" is still the paste operator and must be consumed so the
+    // right operand is handled by AppendOrPaste's placemarker logic rather than
+    // emitted literally.
+    if (cur.GetKind() == TokenKind::kHashHash && i + 1 < body.size()) {
       pending_paste = true;
       continue;
     }
@@ -624,8 +703,10 @@ void TokenLexer::BuildExpansion(MacroArgs* args) {
       produced = adjacent_paste ? args->GetUnexpArgument(pidx)
                                 : args->GetExpandedArgument(pidx, pp_);
       // When a parameter with leading space expands to nothing, remember the
-      // spacing so the next emitted token inherits it (prevents gluing).
-      if (produced.empty() && cur.HasLeadingSpace()) {
+      // spacing so the next emitted token inherits it (prevents gluing). A
+      // parameter that is an operand of "##" is excluded: an empty (placemarker)
+      // paste operand does not contribute a propagating space.
+      if (produced.empty() && cur.HasLeadingSpace() && !adjacent_paste) {
         pending_leading_space_ = true;
       }
     } else {

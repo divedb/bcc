@@ -459,6 +459,35 @@ bool IsKnownAttribute(std::string_view name) {
   return false;
 }
 
+// Strips a single layer of surrounding double underscores: "__c_alignas__"
+// -> "c_alignas". __has_feature/__has_extension accept both spellings.
+std::string_view StripUnderscores(std::string_view name) {
+  if (name.size() >= 4 && name.substr(0, 2) == "__" &&
+      name.substr(name.size() - 2) == "__") {
+    return name.substr(2, name.size() - 4);
+  }
+  return name;
+}
+
+// C-language feature names recognised by __has_feature / __has_extension.
+// bcc targets a C17 / GNU17 dialect, so every C11 feature is available. Both
+// operators accept the bare name and the __name__ spelling.
+bool HasCFeature(std::string_view raw) {
+  std::string_view name = StripUnderscores(raw);
+  static constexpr const char* kFeatures[] = {
+    // C11 core features
+    "c_atomic", "c_static_assert", "c_generic_selections",
+    "c_alignas", "c_alignof", "c_thread_local",
+    "c_generic_selection_with_controlling_type",
+    // Other widely-queried features
+    "attribute_overloadable", "c_nullable", "c_nullability",
+  };
+  for (auto* f : kFeatures) {
+    if (name == f) return true;
+  }
+  return false;
+}
+
 }  // namespace
 
 //===----------------------------------------------------------------------===//
@@ -485,10 +514,17 @@ Token Preprocessor::LexConditionToken() {
                  is_defined ? kOne : kZero, 1u};
   }
 
-  // Intercept __has_builtin / __has_attribute to evaluate them inline.
-  if (ii != nullptr && (ii->GetPPKeyword() == PPKeyword::kHasBuiltin ||
-                        ii->GetPPKeyword() == PPKeyword::kHasAttribute)) {
-    return EvaluateHasExpression(tok);
+  // Intercept __has_builtin / __has_attribute / __has_feature /
+  // __has_extension to evaluate them inline.
+  if (ii != nullptr) {
+    PPKeyword kw = ii->GetPPKeyword();
+    if (kw == PPKeyword::kHasBuiltin || kw == PPKeyword::kHasAttribute ||
+        kw == PPKeyword::kHasFeature || kw == PPKeyword::kHasExtension) {
+      return EvaluateHasExpression(tok);
+    }
+    if (kw == PPKeyword::kIsIdentifier) {
+      return EvaluateIsIdentifier(tok);
+    }
   }
 
   return tok;
@@ -547,8 +583,13 @@ Token Preprocessor::EvaluateHasExpression(Token& tok) {
   if (arg.GetKind() == TokenKind::kIdentifier) {
     IdentifierInfo* arg_ii = LookUpIdentifierInfo(arg);
     std::string_view name = arg_ii->GetName();
-    found = (kw == PPKeyword::kHasBuiltin) ? IsKnownBuiltin(name)
-                                           : IsKnownAttribute(name);
+    switch (kw) {
+      case PPKeyword::kHasBuiltin:    found = IsKnownBuiltin(name); break;
+      case PPKeyword::kHasAttribute:  found = IsKnownAttribute(name); break;
+      case PPKeyword::kHasFeature:
+      case PPKeyword::kHasExtension:  found = HasCFeature(name); break;
+      default: break;
+    }
   }
 
   // Consume the closing ')' (or report an error if missing).
@@ -562,6 +603,50 @@ Token Preprocessor::EvaluateHasExpression(Token& tok) {
   static const char kZero[] = "0";
   return Token{tok.GetLocation(), TokenKind::kNumericConstant,
                found ? kOne : kZero, 1u};
+}
+
+Token Preprocessor::EvaluateIsIdentifier(Token& tok) {
+  // The keyword must be followed by '('.
+  Token open{SourceLocation{}, TokenKind::kUnknown, nullptr, 0u};
+  LexUnexpandedToken(open);
+  if (open.GetKind() != TokenKind::kLParen) {
+    return tok;
+  }
+
+  Token arg{SourceLocation{}, TokenKind::kUnknown, nullptr, 0u};
+  LexUnexpandedToken(arg);
+
+  bool is_identifier = false;
+  if (arg.GetKind() == TokenKind::kIdentifier) {
+    IdentifierInfo* arg_ii = LookUpIdentifierInfo(arg);
+    // GNU-extension keywords (active in gnu* modes) are not identifiers.
+    std::string_view name = arg_ii->GetName();
+    if (name == "typeof" || name == "asm" || name == "__asm" ||
+        name == "__asm__" || name == "__typeof" || name == "__typeof__" ||
+        name == "__inline" || name == "__inline__" || name == "__restrict" ||
+        name == "__restrict__" || name == "__volatile" ||
+        name == "__volatile__" || name == "__alignof" ||
+        name == "__alignof__") {
+      is_identifier = false;
+    } else {
+      is_identifier = true;
+    }
+  } else {
+    // A keyword token kind (kRestrict, kInline, _Bool, ...) is not an
+    // identifier.
+    is_identifier = false;
+  }
+
+  Token close{SourceLocation{}, TokenKind::kUnknown, nullptr, 0u};
+  LexUnexpandedToken(close);
+  if (close.GetKind() != TokenKind::kRParen) {
+    diags_.Report(close.GetLocation(), diag::err_pp_expected_rparen);
+  }
+
+  static const char kOne[] = "1";
+  static const char kZero[] = "0";
+  return Token{tok.GetLocation(), TokenKind::kNumericConstant,
+               is_identifier ? kOne : kZero, 1u};
 }
 
 //===----------------------------------------------------------------------===//

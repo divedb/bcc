@@ -41,9 +41,9 @@ struct RecordingPPCallbacks : public PPCallbacks {
   std::vector<FileEntryInfo> files_entered;
 
   void FileChanged(SourceLocation loc, FileChangeReason reason,
-                   FileID) override {
+                   FileID, CharacteristicKind file_type) override {
     if (reason == FileChangeReason::kEnterFile) {
-      files_entered.push_back({sm.GetFileID(loc), false});
+      files_entered.push_back({sm.GetFileID(loc), IsSystemHeader(file_type)});
     }
   }
 
@@ -67,9 +67,9 @@ struct RecordingPPCallbacks : public PPCallbacks {
     directives.push_back({"pragma"});
   }
   void InclusionDirective(SourceLocation, std::string_view, bool is_angled,
-                          const FileEntry*) override {
+                          const FileEntry*, CharacteristicKind file_type) override {
     FileEntryInfo info;
-    info.is_system_header = is_angled;
+    info.is_system_header = IsSystemHeader(file_type);
     files_entered.push_back(info);
   }
 };
@@ -1627,7 +1627,7 @@ TEST_F(PreprocessorTest, DependencyCollectorCollectsMainAndHeader) {
   struct DepCollector : public PPCallbacks {
     std::vector<std::string> deps;
     void InclusionDirective(SourceLocation, std::string_view filename, bool,
-                            const FileEntry*) override {
+                            const FileEntry*, CharacteristicKind) override {
       deps.emplace_back(filename);
     }
     void WriteMakefile(std::ostream& os, std::string_view target) {
@@ -3313,8 +3313,13 @@ TEST_F(PreprocessorTest, PragmaWithComplexTokens) {
   pp.EnterMainFile();
 
   auto spellings = CollectSpellings(pp);
-  EXPECT_EQ(spellings[0], "int");
-  EXPECT_EQ(spellings[1], "x");
+  // The diagnostic pragmas are re-emitted into the output (matching Clang's
+  // `clang -E -P`), so `int` and `x` are no longer the first two tokens; find
+  // them among the emitted spellings.
+  auto it_int = std::find(spellings.begin(), spellings.end(), "int");
+  ASSERT_NE(it_int, spellings.end());
+  auto it_x = std::find(it_int, spellings.end(), "x");
+  EXPECT_NE(it_x, spellings.end());
 }
 
 // Test macro used before definition

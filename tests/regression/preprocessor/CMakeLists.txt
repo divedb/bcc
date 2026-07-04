@@ -24,6 +24,9 @@ file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/vararg
 file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/spacing
      DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
 
+file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/clang_c
+     DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
+
 add_executable(bcc_pp_regression
   runner.cc
 )

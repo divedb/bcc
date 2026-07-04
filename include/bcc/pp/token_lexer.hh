@@ -57,7 +57,33 @@ class TokenLexer {
   bool FirstTokenHasLeadingSpace() const noexcept {
     return first_token_has_leading_space_;
   }
+  /// True when this expansion ended with a leading space that no output token
+  /// carried, so it must propagate to whatever token follows the expansion:
+  /// either an empty expansion whose invocation had a leading space, or a
+  /// trailing empty parameter whose space was never consumed.
+  bool HasUnconsumedLeadingSpace() const noexcept {
+    if (num_tokens_ == 0)
+      return first_token_has_leading_space_ || pending_leading_space_;
+    return pending_leading_space_;
+  }
+  /// True when an empty expansion was at the start of a line, so that flag
+  /// must propagate to the token following the expansion.
+  bool HasUnconsumedStartOfLine() const noexcept {
+    return num_tokens_ == 0 && first_token_at_start_of_line_;
+  }
   MacroInfo* GetMacro() const noexcept { return macro_; }
+
+  /// Mark the next token produced by Lex() to inherit a leading space. Used
+  /// when a nested (child) expansion that had a leading space expanded to
+  /// nothing: the space must flow to this lexer's following output token.
+  void InheritLeadingSpaceForNext() noexcept {
+    inherit_leading_space_ = true;
+  }
+  /// As above, but for the start-of-line flag (an empty nested expansion at
+  /// the start of a line must carry that onto the following token).
+  void InheritStartOfLineForNext() noexcept {
+    inherit_start_of_line_ = true;
+  }
 
  private:
   /// Builds the substituted replacement list into owned_tokens_ for a
@@ -101,6 +127,12 @@ class TokenLexer {
   /// When a parameter with leading space expands to nothing (empty argument),
   /// this flag is set so the next emitted token inherits that leading space.
   bool pending_leading_space_ = false;
+
+  /// Set by InheritLeadingSpaceForNext(): apply a leading space to the next
+  /// token emitted by Lex() (used to propagate spacing across an empty nested
+  /// expansion).
+  bool inherit_leading_space_ = false;
+  bool inherit_start_of_line_ = false;
 };
 
 }  // namespace bcc

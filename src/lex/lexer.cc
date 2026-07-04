@@ -1,6 +1,7 @@
 #include "bcc/lex/lexer.hh"
 
 #include <cassert>
+#include <cstring>
 #include <optional>
 
 #include "bcc/basic/diagnostic.hh"
@@ -196,6 +197,15 @@ Token BufferedLexer::NextToken() {
     cursor_.Advance();
   }
 
+  // Skip over any conflict-marker sections we have reached.
+  while (ApplyConflictSkips()) {
+    // A conflict start marker may immediately follow another skip.
+  }
+  if (is_at_start_of_line_ && TryConflictMarker()) {
+    while (ApplyConflictSkips()) {
+    }
+  }
+
   InitializeTokenFlags();
   Token token = LexToken();
   UpdateLexerState(token.GetKind());
@@ -305,6 +315,26 @@ Token BufferedLexer::LexNumericConstant(Cursor cursor) noexcept {
         cursor = sign_cursor;
         continue;
       }
+    }
+
+    if (cp == '\\' ) {
+      // A \uXXXX / \UXXXXXXXX UCN is part of the pp-number spelling (clang
+      // keeps it literal even when it forms an invalid suffix).
+      const char* p = candidate.Current();
+      if (p < candidate.End() && (*p == 'u' || *p == 'U')) {
+        int digits = (*p == 'u') ? 4 : 8;
+        const char* h = p + 1;
+        bool ok = (h + digits <= candidate.End());
+        for (int k = 0; ok && k < digits; ++k) {
+          ok = IsHexDigit(static_cast<unsigned char>(h[k]));
+        }
+        if (ok) {
+          candidate.Advance(static_cast<std::size_t>(1 + digits));
+          cursor = candidate;
+          continue;
+        }
+      }
+      break;
     }
 
     if (cp == '.' || IsIdentifierContinue(cp)) {
@@ -700,6 +730,107 @@ Token BufferedLexer::LexToken() noexcept {
   if (IsPunctuatorStart(cp)) return LexPunctuator(lookahead, cp);
 
   return FinalizeToken(TokenKind::kUnknown, lookahead);
+}
+
+//===----------------------------------------------------------------------===//
+// Version-control conflict marker recovery
+//===----------------------------------------------------------------------===//
+
+namespace {
+
+// Returns a pointer to the first byte of the line after the line containing
+// \p p (i.e. just past its terminating newline), or \p end at EOF.
+const char* NextLineStart(const char* p, const char* end) noexcept {
+  while (p < end && *p != '\n') {
+    if (*p == '\r') {
+      ++p;
+      if (p < end && *p == '\n') ++p;
+      return p;
+    }
+    ++p;
+  }
+  if (p < end) ++p;  // past the '\n'
+  return p;
+}
+
+// True if the line starting at \p p begins with \p marker (length \p len) and
+// is followed by horizontal whitespace, a newline, or EOF — i.e. it is a
+// conflict-marker line, not merely a prefix of one.
+bool LineIsMarker(const char* p, const char* end, const char* marker,
+                  std::size_t len) noexcept {
+  if (static_cast<std::size_t>(end - p) < len) return false;
+  if (std::memcmp(p, marker, len) != 0) return false;
+  char c = (p + len < end) ? p[len] : '\n';
+  return c == ' ' || c == '\t' || c == '\n' || c == '\r';
+}
+
+}  // namespace
+
+bool BufferedLexer::ApplyConflictSkips() noexcept {
+  const char* p = cursor_.Current();
+  for (const auto& s : conflict_skips_) {
+    if (p >= s.start && p < s.end) {
+      cursor_.Advance(static_cast<std::size_t>(s.end - p));
+      has_leading_space_ = true;
+      is_at_start_of_line_ = true;
+      return true;
+    }
+  }
+  return false;
+}
+
+bool BufferedLexer::TryConflictMarker() noexcept {
+  const char* p = cursor_.Current();
+  const char* end = cursor_.End();
+
+  // diff3 / normal conflict start: "<<<<<<<" followed by space/newline.
+  if (LineIsMarker(p, end, "<<<<<<<", 7)) {
+    const char* after_start = NextLineStart(p, end);
+    const char* sep = nullptr;
+    const char* endmk = nullptr;
+    for (const char* l = after_start; l < end; l = NextLineStart(l, end)) {
+      if (sep == nullptr &&
+          (LineIsMarker(l, end, "|||||||", 7) ||
+           LineIsMarker(l, end, "=======", 7))) {
+        sep = l;
+      }
+      if (LineIsMarker(l, end, ">>>>>>>", 7)) {
+        endmk = l;
+        break;
+      }
+    }
+    cursor_.Advance(static_cast<std::size_t>(after_start - p));
+    if (sep != nullptr && endmk != nullptr) {
+      conflict_skips_.push_back({sep, NextLineStart(endmk, end)});
+    }
+    return true;
+  }
+
+  // Perforce conflict start: ">>>> " (4 '>' then space).
+  if (end - p >= 5 && std::memcmp(p, ">>>>", 4) == 0 && p[4] == ' ') {
+    const char* after_start = NextLineStart(p, end);
+    const char* sep = nullptr;
+    const char* endmk = nullptr;
+    for (const char* l = after_start; l < end; l = NextLineStart(l, end)) {
+      if (sep == nullptr && end - l >= 5 && std::memcmp(l, "====", 4) == 0 &&
+          l[4] == ' ') {
+        sep = l;
+      }
+      if (LineIsMarker(l, end, "<<<<", 4)) {
+        endmk = l;
+        break;
+      }
+    }
+    cursor_.Advance(static_cast<std::size_t>(after_start - p));
+    if (sep != nullptr) {
+      const char* stop = (endmk != nullptr) ? NextLineStart(endmk, end) : end;
+      conflict_skips_.push_back({sep, stop});
+    }
+    // No separator: just consume the start marker line; the rest is kept.
+    return true;
+  }
+
+  return false;
 }
 
 }  // namespace bcc

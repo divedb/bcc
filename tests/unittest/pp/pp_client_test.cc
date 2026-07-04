@@ -23,11 +23,13 @@ class RecordingCallbacks : public PPCallbacks {
  public:
   explicit RecordingCallbacks(std::vector<std::string>& log) : log_(log) {}
 
-  void FileChanged(SourceLocation, FileChangeReason reason, FileID) override {
+  void FileChanged(SourceLocation, FileChangeReason reason, FileID,
+                   CharacteristicKind) override {
     log_.push_back(reason == FileChangeReason::kEnterFile ? "enter" : "exit");
   }
   void InclusionDirective(SourceLocation, std::string_view filename,
-                          bool is_angled, const FileEntry* file) override {
+                          bool is_angled, const FileEntry* file,
+                          CharacteristicKind) override {
     log_.push_back(std::string("include ") + (is_angled ? "<" : "\"") +
                    std::string(filename) + (file ? " found" : " missing"));
   }

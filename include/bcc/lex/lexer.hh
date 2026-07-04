@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <vector>
 
 #include "bcc/basic/file_id.hh"
 #include "bcc/lex/cursor.hh"
@@ -80,6 +81,24 @@ class BufferedLexer : public LexerBase {
   Token LexWhiteSpace(Cursor cursor) noexcept;
   Token EOFToken() noexcept;
   Token FinalizeToken(TokenKind kind, Cursor cursor) noexcept;
+
+  //===------------------------------------------------------------------===//
+  // Version-control conflict marker recovery.
+  //===------------------------------------------------------------------===//
+
+  // A byte range to skip over (the non-"ours" sections of a conflict block).
+  struct ConflictSkip { const char* start; const char* end; };
+
+  // If the cursor sits at the start of a pending conflict-skip range, advance
+  // past it. Returns true if the cursor moved.
+  bool ApplyConflictSkips() noexcept;
+
+  // Detects a `<<<<<<<` / `>>>> ` conflict marker at the start of the current
+  // line, records the skip ranges for the non-"ours" sections, and advances
+  // the cursor past the start marker line. Returns true if handled.
+  bool TryConflictMarker() noexcept;
+
+  std::vector<ConflictSkip> conflict_skips_;
 
   /// \brief Returns the source location of the first byte of the token
   ///        currently being lexed (i.e. cursor_'s position before any

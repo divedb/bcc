@@ -32,7 +32,7 @@ const FileEntry* HeaderSearch::LookupFile(std::string_view filename,
 
   if (!is_angled) {
     // Quoted include: try the includer's own directory first, then the quoted
-    // search list.
+    // search list. Both are user tiers, so a hit here is kUser (the default).
     if (const FileEntry* fe = fm_.GetFile(JoinPath(includer_dir, filename))) {
       return fe;
     }
@@ -44,9 +44,12 @@ const FileEntry* HeaderSearch::LookupFile(std::string_view filename,
   }
 
   // Both angled includes and quoted includes that fell through above search the
-  // angled (system) list.
+  // angled (system) list. A hit here promotes the file to a system header.
   for (const std::string& dir : angled_dirs_) {
     if (const FileEntry* fe = fm_.GetFile(JoinPath(dir, filename))) {
+      // Upgrade only: a file already marked system (e.g. by #pragma
+      // system_header) is never demoted back to user code by a later lookup.
+      file_info_[fe].file_characteristic = CharacteristicKind::kSystem;
       return fe;
     }
   }
@@ -81,7 +84,7 @@ const FileEntry* HeaderSearch::LookupFileNext(std::string_view filename,
     }
 
     if (found_in_quoted) {
-      // Search remaining quoted dirs after the includer's dir.
+      // Search remaining quoted dirs after the includer's dir (user tier).
       for (std::size_t i = start_angled; i < quoted_dirs_.size(); ++i) {
         if (const FileEntry* fe = fm_.GetFile(JoinPath(quoted_dirs_[i], filename))) {
           return fe;
@@ -107,6 +110,7 @@ const FileEntry* HeaderSearch::LookupFileNext(std::string_view filename,
     }
     if (found_in_angled || !is_angled) {
       if (const FileEntry* fe = fm_.GetFile(JoinPath(angled_dirs_[i], filename))) {
+        file_info_[fe].file_characteristic = CharacteristicKind::kSystem;
         return fe;
       }
     }

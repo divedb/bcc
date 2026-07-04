@@ -9,6 +9,7 @@
 #include "bcc/basic/file_manager.hh"
 #include "bcc/basic/source_manager.hh"
 #include "bcc/pp/header_search.hh"
+#include "bcc/pp/pp_callbacks.hh"
 #include "bcc/pp/preprocessor.hh"
 #include "bcc/lex/token_kind.hh"
 #include "gtest/gtest.h"
@@ -203,6 +204,97 @@ TEST_F(IncludeTest, WorksWithoutHeaderSearchByReportingNotFound) {
   }
   EXPECT_EQ(out, (std::vector<std::string>{"ok"}));
   EXPECT_EQ(diags_->NumErrors(), 1u);
+}
+
+// Records the system-header characteristic reported for #include resolution and
+// file-enter/exit transitions. Installed after EnterMainFile so only the
+// included file's transitions are captured (not the main file's own enter).
+class CharacteristicCallbacks : public PPCallbacks {
+ public:
+  CharacteristicKind last_inclusion = CharacteristicKind::kUser;
+  std::vector<CharacteristicKind> entered;
+  std::vector<CharacteristicKind> exited;
+
+  void FileChanged(SourceLocation, FileChangeReason reason, FileID,
+                   CharacteristicKind file_type) override {
+    if (reason == FileChangeReason::kEnterFile) {
+      entered.push_back(file_type);
+    } else {
+      exited.push_back(file_type);
+    }
+  }
+  void InclusionDirective(SourceLocation, std::string_view, bool,
+                          const FileEntry*,
+                          CharacteristicKind file_type) override {
+    last_inclusion = file_type;
+  }
+};
+
+// A header found on the angled (system) search path is reported as a system
+// header both at #include resolution and on file entry; exiting it returns to
+// the user-coded main file.
+TEST_F(IncludeTest, AngledIncludeIsSystemHeader) {
+  WriteFile("foo.h", "int x;\n");
+  SetMainFile("main.c", "#include <foo.h>\n");
+
+  auto pp = MakePP();
+  auto cb = std::make_unique<CharacteristicCallbacks>();
+  CharacteristicCallbacks* raw = cb.get();
+  pp->SetPPCallbacks(std::move(cb));
+
+  LexSpellings(*pp);
+
+  EXPECT_EQ(raw->last_inclusion, CharacteristicKind::kSystem);
+  ASSERT_EQ(raw->entered.size(), 1u);
+  EXPECT_EQ(raw->entered.front(), CharacteristicKind::kSystem);
+  ASSERT_EQ(raw->exited.size(), 1u);
+  // Resuming the main file reports a user characteristic.
+  EXPECT_EQ(raw->exited.front(), CharacteristicKind::kUser);
+}
+
+// A quoted include resolved relative to the includer is user code throughout.
+TEST_F(IncludeTest, QuotedIncludeIsUserHeader) {
+  WriteFile("bar.h", "char c;\n");
+  SetMainFile("main.c", "#include \"bar.h\"\n");
+
+  auto pp = MakePP();
+  auto cb = std::make_unique<CharacteristicCallbacks>();
+  CharacteristicCallbacks* raw = cb.get();
+  pp->SetPPCallbacks(std::move(cb));
+
+  LexSpellings(*pp);
+
+  EXPECT_EQ(raw->last_inclusion, CharacteristicKind::kUser);
+  for (CharacteristicKind ck : raw->entered) {
+    EXPECT_EQ(ck, CharacteristicKind::kUser);
+  }
+}
+
+// `#pragma GCC system_header` promotes the current file to a system header:
+// IsInSystemHeader() reflects it while the file is being lexed, and the
+// promotion is recorded in HeaderSearch for later lookups.
+TEST_F(IncludeTest, PragmaSystemHeaderPromotesCurrentFile) {
+  WriteFile("sys.h", "#pragma GCC system_header\nbody\n");
+  SetMainFile("main.c", "#include \"sys.h\"\n");
+
+  auto pp = MakePP();
+
+  // The header resolves via the includer directory, so at #include time it is
+  // still user code.
+  bool in_system_for_body = false;
+  for (;;) {
+    Token t = pp->Lex();
+    if (t.GetKind() == TokenKind::kEOF) break;
+    // The only emitted token is "body", which follows the pragma inside sys.h.
+    in_system_for_body = pp->IsInSystemHeader();
+  }
+  EXPECT_TRUE(in_system_for_body);
+
+  // The pragma persisted the system characteristic on the file's record.
+  const FileEntry* fe = fm_->GetFile((dir_ / "sys.h").string());
+  ASSERT_NE(fe, nullptr);
+  EXPECT_EQ(hs_->GetFileCharacteristic(fe), CharacteristicKind::kSystem);
+  EXPECT_FALSE(diags_->HasErrors());
 }
 
 }  // namespace
