@@ -22,21 +22,34 @@ namespace bcc {
 class DiagnosticOptions {
  public:
   /// \brief Override the effective severity for a specific diagnostic kind.
+  ///
+  /// \param kind The diagnostic kind to override.
+  /// \param sev  The new severity for the diagnostic kind.
   void SetSeverity(diag::DiagKind kind, DiagSeverity sev);
 
   /// \brief Suppress a specific diagnostic kind (never emitted).
+  ///
+  /// \param kind The diagnostic kind to suppress.
   void Ignore(diag::DiagKind kind);
 
   /// \brief Override the effective severity for all diagnostics in \p group.
+  ///
+  /// \param group The diagnostic group to override.
+  /// \param sev   The new severity for the diagnostic group.
   void SetGroupSeverity(std::string_view group, DiagSeverity sev);
 
   /// \brief Suppress all diagnostics in \p group.
+  ///
+  /// \param group The diagnostic group to suppress.
   void IgnoreGroup(std::string_view group);
 
-  /// \brief Returns the effective severity for \p kind after applying overrides.
+  /// \brief Returns the effective severity for \p kind after applying
+  ///        overrides.
   ///
-  /// Returns std::nullopt if the diagnostic is suppressed.
-  std::optional<DiagSeverity> GetEffectiveSeverity(diag::DiagKind kind) const noexcept;
+  /// \return The effective severity for \p kind, or std::nullopt if the
+  ///         diagnostic is suppressed.
+  std::optional<DiagSeverity> GetEffectiveSeverity(
+      diag::DiagKind kind) const noexcept;
 
  private:
   struct Override {

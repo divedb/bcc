@@ -250,9 +250,9 @@ class DiagnosticsEngine {
   unsigned num_errors_ = 0;
   unsigned num_warnings_ = 0;
   unsigned num_notes_ = 0;
+  unsigned error_limit_ = 0;
   bool fatal_error_occurred_ = false;
   bool suppress_all_ = false;
-  unsigned error_limit_ = 0;
 };
 
 /// \brief Represents a diagnostic consumer that ignores all diagnostics.
