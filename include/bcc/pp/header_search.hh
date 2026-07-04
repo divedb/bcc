@@ -42,13 +42,12 @@ struct HeaderFileInfo {
 /// \brief Resolves #include filenames against an ordered list of search
 ///        directories and tracks the multiple-include optimization.
 ///
-/// Mirrors the resolution rules of Clang's HeaderSearch at a small scale:
 ///   * A quoted include ("foo.h") is looked up first relative to the directory
 ///     of the file performing the include, then in the quoted search list, then
 ///     in the angled (system) search list.
 ///   * An angled include (<foo.h>) is looked up only in the angled search list.
 ///
-/// An absolute filename bypasses the search list entirely.
+/// \note An absolute filename bypasses the search list entirely.
 class HeaderSearch {
  public:
   explicit HeaderSearch(FileManager& fm) : fm_(fm) {}
@@ -57,12 +56,16 @@ class HeaderSearch {
   HeaderSearch& operator=(const HeaderSearch&) = delete;
 
   /// \brief Adds a directory searched for quoted ("...") includes only.
+  ///
+  /// \param dir The directory to add to the quoted search list.
   void AddQuotedSearchPath(std::string dir) {
     quoted_dirs_.push_back(std::move(dir));
   }
 
   /// \brief Adds a directory searched for both angled (<...>) and quoted
   ///        includes (the system / -I search list).
+  ///
+  /// \param dir The directory to add to the angled search list.
   void AddAngledSearchPath(std::string dir) {
     angled_dirs_.push_back(std::move(dir));
   }
@@ -97,22 +100,46 @@ class HeaderSearch {
 
   /// \brief Returns the HeaderFileInfo for \p fe if one has been recorded, or
   ///        nullptr if the file has never been fully preprocessed.
+  ///
+  /// \param fe The file to query.
+  /// \return   The HeaderFileInfo for \p fe, or nullptr if none exists
   const HeaderFileInfo* GetExistingFileInfo(const FileEntry* fe) const {
     auto it = file_info_.find(fe);
+
     return it == file_info_.end() ? nullptr : &it->second;
   }
 
+  /// \brief Determine whether this file is intended to be safe from
+  ///        multiple inclusions, e.g., it has \#pragma once or a controlling
+  ///        macro.
+  ///
+  /// This routine does not consider the effect of \#import
+  bool IsFileMultipleIncludeGuarded(const FileEntry* fe) const {
+    if (const HeaderFileInfo* info = GetExistingFileInfo(fe)) {
+      return info->is_pragma_once || info->controlling_macro != nullptr;
+    }
+
+    return false;
+  }
+
   /// \brief Marks \p fe as `#pragma once`: it must not be entered again.
+  ///
+  /// \param fe The file to mark as `#pragma once`.
   void MarkFileIncludeOnce(const FileEntry* fe) {
     file_info_[fe].is_pragma_once = true;
   }
 
   /// \brief Records the include-guard controlling macro learned for \p fe.
+  ///
+  /// \param fe The file to record the controlling macro for.
+  /// \param m  The controlling macro.
   void SetFileControllingMacro(const FileEntry* fe, const IdentifierInfo* m) {
     file_info_[fe].controlling_macro = m;
   }
 
   /// \brief Marks \p fe as imported via `#import`.
+  ///
+  /// \param fe The file to mark as imported.
   void SetFileImported(const FileEntry* fe) {
     file_info_[fe].is_imported = true;
   }
@@ -132,20 +159,38 @@ class HeaderSearch {
     if (const HeaderFileInfo* info = GetExistingFileInfo(fe)) {
       return info->file_characteristic;
     }
+
     return CharacteristicKind::kUser;
   }
 
   /// \brief Promotes \p fe to a system header, as if by
   ///        `#pragma GCC system_header`.
+  ///
+  /// \param fe The file to mark as a system header.
   void MarkFileAsSystemHeader(const FileEntry* fe) {
     file_info_[fe].file_characteristic = CharacteristicKind::kSystem;
   }
 
  private:
+  auto LookupInQuotedDirs(std::string_view filename,
+                          std::string_view includer_dir) const
+      -> const FileEntry*;
+
+  auto LookupInAngledDirs(std::string_view filename) const -> const FileEntry*;
+
+  auto LookupNextInQuotedDirs(std::string_view filename,
+                              std::string_view includer_dir) const
+      -> const FileEntry*;
+
+  auto LookupNextInAngledDirs(std::string_view filename,
+                              std::string_view includer_dir,
+                              bool is_angled) const
+      -> const FileEntry*;
+
   FileManager& fm_;
   std::vector<std::string> quoted_dirs_;
   std::vector<std::string> angled_dirs_;
-  std::unordered_map<const FileEntry*, HeaderFileInfo> file_info_;
+  mutable std::unordered_map<const FileEntry*, HeaderFileInfo> file_info_;
 };
 
 }  // namespace bcc

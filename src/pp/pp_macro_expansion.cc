@@ -1,5 +1,6 @@
 #include <cstddef>
 #include <cstdint>
+#include <ctime>
 #include <memory>
 #include <optional>
 #include <string>
