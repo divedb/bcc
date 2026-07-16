@@ -1,8 +1,8 @@
 #pragma once
 
+#include <functional>
 #include <memory>
 #include <set>
-#include <functional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -11,10 +11,10 @@
 #include "bcc/basic/characteristic_kind.hh"
 #include "bcc/basic/file_id.hh"
 #include "bcc/basic/source_location.hh"
+#include "bcc/lex/token.hh"
 #include "bcc/pp/identifier_table.hh"
 #include "bcc/pp/pp_lexer.hh"
 #include "bcc/pp/scratch_buffer.hh"
-#include "bcc/lex/token.hh"
 
 namespace bcc {
 
@@ -58,6 +58,8 @@ class Preprocessor {
   /// Must be set before any #include directive is processed. When unset, an
   /// #include reports its filename as not found. The HeaderSearch must outlive
   /// this Preprocessor.
+  ///
+  /// \param hs The HeaderSearch to use for #include resolution.
   void SetHeaderSearch(HeaderSearch& hs) noexcept { header_search_ = &hs; }
 
   /// \brief Installs the observer that receives preprocessor events.
@@ -141,7 +143,8 @@ class Preprocessor {
   /// Used by `-dM` (and `-dD`) to enumerate the final macro table. The visitor
   /// receives the macro's name and its active MacroInfo. Order is unspecified.
   void ForEachDefinedMacro(
-      std::function<void(const IdentifierInfo*, const MacroInfo*)> visitor) const;
+      std::function<void(const IdentifierInfo*, const MacroInfo*)> visitor)
+      const;
 
   ScratchBuffer& GetScratchBuffer() noexcept { return scratch_; }
 
@@ -219,8 +222,8 @@ class Preprocessor {
   /// optimization, and enters the file (or reports it as not found).
   void HandleIncludeDirective(Token& include_tok);
 
-  /// Handles #include_next: like HandleIncludeDirective but searches directories
-  /// after the includer's directory in the search path.
+  /// Handles #include_next: like HandleIncludeDirective but searches
+  /// directories after the includer's directory in the search path.
   void HandleIncludeNextDirective(Token& include_next_tok);
 
   /// Handles #import: like HandleIncludeDirective but marks the file as
@@ -244,8 +247,8 @@ class Preprocessor {
 
   /// Common include logic shared by #include, #include_next, #import, and
   /// __include_macros. Returns true if the file was entered.
-  bool HandleIncludeCommon(Token& include_tok, bool is_include_next, bool is_import,
-                           bool macros_only);
+  bool HandleIncludeCommon(Token& include_tok, bool is_include_next,
+                           bool is_import, bool macros_only);
 
   /// Handles #pragma. Recognizes `#pragma once`, `#pragma GCC poison`,
   /// `#pragma GCC system_header`, `#pragma GCC dependency`,
@@ -390,9 +393,9 @@ class Preprocessor {
   /// '(' must already have been consumed; consumes through the closing ')'.
   MacroArgs ReadFunctionLikeMacroArgs(MacroInfo* macro);
 
-  /// Reads the next token directly from the lexer stack, crossing file/expansion
-  /// boundaries, without macro expansion or directive handling. Used for
-  /// argument collection and lookahead.
+  /// Reads the next token directly from the lexer stack, crossing
+  /// file/expansion boundaries, without macro expansion or directive handling.
+  /// Used for argument collection and lookahead.
   void LexUnexpandedToken(Token& result);
 
   MacroInfo* AllocateMacroInfo(SourceLocation loc);
@@ -450,14 +453,17 @@ class Preprocessor {
   /// Tokens lexed ahead of consumption (via LookAhead) or retained for
   /// backtracking. Replayed by Lex() before pulling new tokens.
   std::vector<Token> cached_tokens_;
+
   /// Index of the next cached token Lex() will replay.
   std::size_t cached_lex_pos_ = 0;
+
   /// Positions in cached_tokens_ marked by EnableBacktrackAtThisPos(), one per
   /// active (possibly nested) backtrack scope.
   std::vector<std::size_t> backtrack_positions_;
 
   /// The file currently being lexed, or null while expanding a macro.
   std::unique_ptr<PPLexer> cur_lexer_;
+
   /// The macro currently being expanded, or null while lexing a file.
   std::unique_ptr<TokenLexer> cur_token_lexer_;
   LexerCallback cur_lexer_callback_ = &CLK_Lexer;
@@ -467,6 +473,7 @@ class Preprocessor {
 
   /// Monotonic source of __COUNTER__ values.
   unsigned counter_ = 0;
+
   /// Translation-unit-wide __DATE__ / __TIME__ spellings, including quotes,
   /// computed once at construction so every expansion agrees.
   std::string date_literal_;
@@ -503,10 +510,12 @@ class Preprocessor {
 
   /// Macro stack for `#pragma push_macro` / `#pragma pop_macro`.
   /// Maps identifier name -> stack of MacroDirective* snapshots.
-  std::unordered_map<std::string, std::vector<MacroDirective*>> macro_pragma_stack_;
+  std::unordered_map<std::string, std::vector<MacroDirective*>>
+      macro_pragma_stack_;
 
   /// Latest #define/#undef directive per identifier (head of its history).
   std::unordered_map<const IdentifierInfo*, MacroDirective*> macros_;
+
   /// Backing storage owning every MacroInfo / MacroDirective.
   std::vector<std::unique_ptr<MacroInfo>> macro_infos_;
   std::vector<std::unique_ptr<MacroDirective>> macro_directives_;

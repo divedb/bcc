@@ -30,6 +30,36 @@ constexpr int HexDigitValue(uint32_t cp) noexcept {
   __builtin_unreachable();
 }
 
+/// Removes translation-phase backslash-newline splices from raw source text.
+/// Horizontal whitespace between the backslash and newline is accepted to
+/// match Cursor's extension behavior.
+inline std::string RemoveLineSplices(std::string_view raw) {
+  if (raw.find('\\') == std::string_view::npos) return std::string(raw);
+
+  std::string out;
+  out.reserve(raw.size());
+  for (std::size_t i = 0; i < raw.size();) {
+    if (raw[i] == '\\') {
+      std::size_t newline = i + 1;
+      while (newline < raw.size() &&
+             (raw[newline] == ' ' || raw[newline] == '\t')) {
+        ++newline;
+      }
+      if (newline < raw.size() &&
+          IsNewLine(static_cast<unsigned char>(raw[newline]))) {
+        const char first = raw[newline++];
+        if (first == '\r' && newline < raw.size() && raw[newline] == '\n') {
+          ++newline;
+        }
+        i = newline;
+        continue;
+      }
+    }
+    out += raw[i++];
+  }
+  return out;
+}
+
 // Appends the UTF-8 encoding of codepoint \p cp to \p out.
 inline void AppendUtf8(uint32_t cp, std::string& out) {
   if (cp <= 0x7F) {

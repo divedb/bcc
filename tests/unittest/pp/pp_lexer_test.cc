@@ -131,6 +131,36 @@ TEST_F(PPLexerTest, LexesQuotedHeaderNameWithLiteralBackslash) {
   EXPECT_EQ(pp.Lex().GetKind(), TokenKind::kEod);
 }
 
+TEST_F(PPLexerTest, SkipsCommentsBeforeHeaderName) {
+  auto pp = Make("#include /* comment */ <commented.h>\n");
+
+  EXPECT_EQ(pp.Lex().GetKind(), TokenKind::kHash);
+  pp.SetParsingPreprocessorDirective(true);
+  EXPECT_EQ(pp.Lex().GetLexeme(), "include");
+
+  Token name = pp.LexIncludeFilename();
+  EXPECT_EQ(name.GetKind(), TokenKind::kHeaderName);
+  EXPECT_EQ(name.GetLexeme(), "<commented.h>");
+  EXPECT_TRUE(name.HasLeadingSpace());
+
+  EXPECT_EQ(pp.Lex().GetKind(), TokenKind::kEod);
+}
+
+TEST_F(PPLexerTest, LexesLineSplicedHeaderName) {
+  auto pp = Make("#include <foo\\\nbar.h>\n");
+
+  EXPECT_EQ(pp.Lex().GetKind(), TokenKind::kHash);
+  pp.SetParsingPreprocessorDirective(true);
+  EXPECT_EQ(pp.Lex().GetLexeme(), "include");
+
+  Token name = pp.LexIncludeFilename();
+  EXPECT_EQ(name.GetKind(), TokenKind::kHeaderName);
+  EXPECT_EQ(name.GetLexeme(), "<foo\\\nbar.h>");
+  EXPECT_TRUE(name.NeedsCleaning());
+
+  EXPECT_EQ(pp.Lex().GetKind(), TokenKind::kEod);
+}
+
 TEST_F(PPLexerTest, ComputedIncludeFallsBackToOrdinaryToken) {
   auto pp = Make("#include MACRO\n");
 

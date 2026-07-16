@@ -10,29 +10,6 @@
 
 namespace bcc {
 
-namespace {
-
-/// Strips backslash-newline line splices from a raw lexeme so a macro body that
-/// spans a splice (e.g. `#define X fo\\\no`) rejoins to its logical spelling.
-std::string CleanLexeme(std::string_view raw) {
-  if (raw.find('\\') == std::string_view::npos) return std::string(raw);
-  std::string out;
-  out.reserve(raw.size());
-  for (std::size_t i = 0; i < raw.size();) {
-    if (raw[i] == '\\' && i + 1 < raw.size() &&
-        IsNewLine(static_cast<unsigned char>(raw[i + 1]))) {
-      char newline = raw[i + 1];
-      i += 2;
-      if (newline == '\r' && i < raw.size() && raw[i] == '\n') ++i;
-      continue;
-    }
-    out.push_back(raw[i++]);
-  }
-  return out;
-}
-
-}  // namespace
-
 std::string FormatMacroDefine(const IdentifierInfo& name, const MacroInfo& macro) {
   std::string out = "#define ";
   out += name.GetName();
@@ -72,7 +49,7 @@ std::string FormatMacroDefine(const IdentifierInfo& name, const MacroInfo& macro
     } else if (t.HasLeadingSpace()) {
       out += ' ';
     }
-    out += CleanLexeme(t.GetLexeme());
+    out += RemoveLineSplices(t.GetLexeme());
   }
 
   return out;

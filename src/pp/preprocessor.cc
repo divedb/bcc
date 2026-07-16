@@ -20,27 +20,6 @@ namespace bcc {
 
 namespace {
 
-/// Removes backslash-newline line splices from a raw lexeme. Identifiers that
-/// span a line splice (e.g. "in\\\nt") must be joined before interning so that
-/// they compare equal to their unspliced spelling.
-std::string CleanLexeme(std::string_view raw) {
-  std::string out;
-  out.reserve(raw.size());
-
-  for (std::size_t i = 0; i < raw.size();) {
-    if (raw[i] == '\\' && i + 1 < raw.size() &&
-        IsNewLine(static_cast<unsigned char>(raw[i + 1]))) {
-      const char newline = raw[i + 1];
-      i += 2;
-      if (newline == '\r' && i < raw.size() && raw[i] == '\n') ++i;
-      continue;
-    }
-    out.push_back(raw[i++]);
-  }
-
-  return out;
-}
-
 /// Builds the __DATE__ ("Mmm dd yyyy") and __TIME__ ("hh:mm:ss") string
 /// literals, including surrounding quotes, from the current local time.
 void InitDateTimeLiterals(std::string& date_out, std::string& time_out) {
@@ -337,7 +316,7 @@ bool Preprocessor::HandleEndOfFile(const Token& eof_tok, Token& result) {
 IdentifierInfo* Preprocessor::LookUpIdentifierInfo(Token& tok) {
   IdentifierInfo* info;
   if (tok.NeedsCleaning()) [[unlikely]] {
-    info = &identifiers_.Get(CleanLexeme(tok.GetLexeme()));
+    info = &identifiers_.Get(RemoveLineSplices(tok.GetLexeme()));
   } else {
     info = &identifiers_.Get(tok.GetLexeme());
   }

@@ -7,6 +7,7 @@
 #include "bcc/basic/diagnostic_ids.hh"
 #include "bcc/basic/file_manager.hh"
 #include "bcc/basic/source_manager.hh"
+#include "bcc/common/string_util.hh"
 #include "bcc/pp/header_search.hh"
 #include "bcc/pp/identifier_table.hh"
 #include "bcc/pp/macro_info.hh"
@@ -17,11 +18,21 @@ namespace bcc {
 
 namespace {
 
+std::string CleanTokenSpelling(const Token& token) {
+  if (token.NeedsCleaning()) {
+    return RemoveLineSplices(token.GetLexeme());
+  }
+  return std::string(token.GetLexeme());
+}
+
 const char* ElifKeywordName(PPKeyword kw) {
   switch (kw) {
-    case PPKeyword::kElifdef: return "elifdef";
-    case PPKeyword::kElifndef: return "elifndef";
-    default: return "elif";
+    case PPKeyword::kElifdef:
+      return "elifdef";
+    case PPKeyword::kElifndef:
+      return "elifndef";
+    default:
+      return "elif";
   }
 }
 
@@ -48,11 +59,23 @@ std::string DecodeStringLiteralBytes(std::string_view lexeme) {
       return c - 'A' + 10;
     };
     switch (e) {
-      case 'n': out += '\n'; break;
-      case 't': out += '\t'; break;
-      case 'r': out += '\r'; break;
-      case '0': case '1': case '2': case '3':
-      case '4': case '5': case '6': case '7': {
+      case 'n':
+        out += '\n';
+        break;
+      case 't':
+        out += '\t';
+        break;
+      case 'r':
+        out += '\r';
+        break;
+      case '0':
+      case '1':
+      case '2':
+      case '3':
+      case '4':
+      case '5':
+      case '6':
+      case '7': {
         int v = e - '0';
         int count = 1;
         while (count < 3 && i + 1 < lexeme.size() && lexeme[i + 1] >= '0' &&
@@ -65,14 +88,16 @@ std::string DecodeStringLiteralBytes(std::string_view lexeme) {
       }
       case 'x': {
         int v = 0;
-        while (i + 1 < lexeme.size() && std::isxdigit(
-                   static_cast<unsigned char>(lexeme[i + 1]))) {
+        while (i + 1 < lexeme.size() &&
+               std::isxdigit(static_cast<unsigned char>(lexeme[i + 1]))) {
           v = v * 16 + hexdigit(lexeme[++i]);
         }
         out += static_cast<char>(v);
         break;
       }
-      default: out += e; break;
+      default:
+        out += e;
+        break;
     }
   }
   return out;
@@ -103,7 +128,8 @@ std::string EncodePragmaMessageBytes(std::string_view bytes) {
 }  // namespace
 
 void Preprocessor::HandleDirective(Token& /*hash_tok*/) {
-  // The rest of the line is a directive: turn its terminating newline into kEod.
+  // The rest of the line is a directive: turn its terminating newline into
+  // kEod.
   cur_lexer_->SetParsingPreprocessorDirective(true);
 
   Token directive = cur_lexer_->Lex();
@@ -327,12 +353,14 @@ std::string_view Preprocessor::GetCurrentFileDir() const {
 }
 
 void Preprocessor::HandleIncludeDirective(Token& include_tok) {
-  HandleIncludeCommon(include_tok, /*is_include_next=*/false, /*is_import=*/false,
+  HandleIncludeCommon(include_tok, /*is_include_next=*/false,
+                      /*is_import=*/false,
                       /*macros_only=*/false);
 }
 
 void Preprocessor::HandleIncludeNextDirective(Token& include_tok) {
-  HandleIncludeCommon(include_tok, /*is_include_next=*/true, /*is_import=*/false,
+  HandleIncludeCommon(include_tok, /*is_include_next=*/true,
+                      /*is_import=*/false,
                       /*macros_only=*/false);
 }
 
@@ -342,12 +370,13 @@ void Preprocessor::HandleImportDirective(Token& import_tok) {
 }
 
 void Preprocessor::HandleIncludeMacrosDirective(Token& include_tok) {
-  HandleIncludeCommon(include_tok, /*is_include_next=*/false, /*is_import=*/false,
+  HandleIncludeCommon(include_tok, /*is_include_next=*/false,
+                      /*is_import=*/false,
                       /*macros_only=*/true);
 }
 
 bool Preprocessor::HandleIncludeCommon(Token& include_tok, bool is_include_next,
-                                        bool is_import, bool macros_only) {
+                                       bool is_import, bool macros_only) {
   // A file-scope directive breaks the include-guard shape.
   if (cur_lexer_->GetConditionalStackDepth() == 0) {
     cur_lexer_->GetMIOpt().OtherTopLevelDirective();
@@ -360,7 +389,8 @@ bool Preprocessor::HandleIncludeCommon(Token& include_tok, bool is_include_next,
   bool consumed_to_eod = false;
 
   if (filename_tok.GetKind() == TokenKind::kHeaderName) {
-    std::string_view raw = filename_tok.GetLexeme();
+    std::string spelling = CleanTokenSpelling(filename_tok);
+    std::string_view raw = spelling;
     is_angled = raw.front() == '<';
     filename = std::string(raw.substr(1, raw.size() - 2));
   } else if (filename_tok.GetKind() == TokenKind::kEod ||
@@ -375,7 +405,8 @@ bool Preprocessor::HandleIncludeCommon(Token& include_tok, bool is_include_next,
     toks.push_back(filename_tok);
     for (;;) {
       Token t = cur_lexer_->Lex();
-      if (t.GetKind() == TokenKind::kEod || t.GetKind() == TokenKind::kEOF) break;
+      if (t.GetKind() == TokenKind::kEod || t.GetKind() == TokenKind::kEOF)
+        break;
       toks.push_back(t);
     }
     consumed_to_eod = true;
@@ -406,7 +437,8 @@ bool Preprocessor::HandleIncludeCommon(Token& include_tok, bool is_include_next,
   const FileEntry* fe = nullptr;
   if (header_search_) {
     if (is_include_next) {
-      fe = header_search_->LookupFileNext(filename, is_angled, GetCurrentFileDir());
+      fe = header_search_->LookupFileNext(filename, is_angled,
+                                          GetCurrentFileDir());
     } else {
       fe = header_search_->LookupFile(filename, is_angled, GetCurrentFileDir());
     }
@@ -423,8 +455,8 @@ bool Preprocessor::HandleIncludeCommon(Token& include_tok, bool is_include_next,
   if (fe == nullptr) {
     diags_.Report(filename_tok.GetLocation(),
                   is_include_next ? diag::err_pp_include_next_not_found
-                  : is_import ? diag::err_pp_import_failed
-                  : diag::err_pp_file_not_found)
+                  : is_import     ? diag::err_pp_import_failed
+                                  : diag::err_pp_file_not_found)
         << filename;
     return false;
   }
@@ -441,9 +473,8 @@ bool Preprocessor::HandleIncludeCommon(Token& include_tok, bool is_include_next,
   // Multiple-include optimization.
   if (!is_import) {
     if (const HeaderFileInfo* info = header_search_->GetExistingFileInfo(fe)) {
-      if (info->is_pragma_once ||
-          (info->controlling_macro != nullptr &&
-           IsMacroDefined(info->controlling_macro))) {
+      if (info->is_pragma_once || (info->controlling_macro != nullptr &&
+                                   IsMacroDefined(info->controlling_macro))) {
         return false;
       }
     }
@@ -458,8 +489,8 @@ bool Preprocessor::HandleIncludeCommon(Token& include_tok, bool is_include_next,
   if (!fid.IsValid()) {
     diags_.Report(filename_tok.GetLocation(),
                   is_include_next ? diag::err_pp_include_next_not_found
-                  : is_import ? diag::err_pp_import_failed
-                  : diag::err_pp_file_not_found)
+                  : is_import     ? diag::err_pp_import_failed
+                                  : diag::err_pp_file_not_found)
         << filename;
     return false;
   }
@@ -470,11 +501,10 @@ bool Preprocessor::HandleIncludeCommon(Token& include_tok, bool is_include_next,
   }
 
   // For __include_macros, we temporarily suppress token output.
-  // This is done by processing the file normally but discarding non-macro tokens.
-  // We use a special flag to skip non-directive tokens.
-  // For now, we enter the file normally. A more sophisticated implementation
-  // would skip non-#define tokens, but for correctness the macros are still
-  // processed.
+  // This is done by processing the file normally but discarding non-macro
+  // tokens. We use a special flag to skip non-directive tokens. For now, we
+  // enter the file normally. A more sophisticated implementation would skip
+  // non-#define tokens, but for correctness the macros are still processed.
   EnterIncludeFile(fid, filename_tok.GetLocation(), fe);
   return true;
 }
@@ -486,9 +516,9 @@ bool Preprocessor::ExtractMacroHeaderName(MacroInfo* macro,
   if (repl.empty()) return false;
 
   // Case 1: Single string literal: #define MACRO "file.h"
-  if (repl.size() == 1 &&
-      repl[0].GetKind() == TokenKind::kStringLiteral) {
-    std::string_view raw = repl[0].GetLexeme();
+  if (repl.size() == 1 && repl[0].GetKind() == TokenKind::kStringLiteral) {
+    std::string spelling = CleanTokenSpelling(repl[0]);
+    std::string_view raw = spelling;
     if (raw.size() >= 2 && raw.front() == '"' && raw.back() == '"') {
       filename = std::string(raw.substr(1, raw.size() - 2));
       is_angled = false;
@@ -502,7 +532,7 @@ bool Preprocessor::ExtractMacroHeaderName(MacroInfo* macro,
       repl.back().GetKind() == TokenKind::kGreater) {
     filename.clear();
     for (std::size_t i = 1; i < repl.size() - 1; ++i) {
-      filename += repl[i].GetLexeme();
+      filename += CleanTokenSpelling(repl[i]);
     }
     is_angled = true;
     return true;
@@ -529,7 +559,8 @@ bool Preprocessor::InterpretExpandedHeader(const std::vector<Token>& toks,
   if (n == 0) return false;
 
   if (n == 1 && IsStringLiteralKind(toks[0].GetKind())) {
-    std::string_view raw = toks[0].GetLexeme();
+    std::string spelling = CleanTokenSpelling(toks[0]);
+    std::string_view raw = spelling;
     // Skip an encoding prefix to find the opening quote.
     std::size_t q = raw.find('"');
     if (q == std::string_view::npos) return false;
@@ -542,7 +573,7 @@ bool Preprocessor::InterpretExpandedHeader(const std::vector<Token>& toks,
       toks[n - 1].GetKind() == TokenKind::kGreater) {
     filename.clear();
     for (std::size_t i = 1; i + 1 < n; ++i) {
-      filename += toks[i].GetLexeme();
+      filename += CleanTokenSpelling(toks[i]);
     }
     is_angled = true;
     return true;
@@ -714,8 +745,7 @@ void Preprocessor::HandleGCCOrClangPragma(Token& pragma_tok, Token& ns_tok) {
 }
 
 void Preprocessor::HandlePragmaMessageLike(const Token& pragma_tok,
-                                           std::string_view kind,
-                                           bool is_gcc) {
+                                           std::string_view kind, bool is_gcc) {
   // Read (macro-expanded) the rest of the directive line.
   bool paren_form = false;
   std::string concatenated;
@@ -814,7 +844,8 @@ bool Preprocessor::HandlePragmaOperator(Token& tok) {
   Token open{SourceLocation{}, TokenKind::kUnknown, nullptr, 0u};
   LexUnexpandedToken(open);
   if (open.GetKind() != TokenKind::kLParen) {
-    if (open.GetKind() != TokenKind::kEOF && open.GetKind() != TokenKind::kEod) {
+    if (open.GetKind() != TokenKind::kEOF &&
+        open.GetKind() != TokenKind::kEod) {
       EnterTokenStream(std::vector<Token>{open});
     }
     return false;  // not a _Pragma(...) call: emit _Pragma as an identifier.
@@ -885,8 +916,7 @@ bool Preprocessor::HandlePragmaOperator(Token& tok) {
 void Preprocessor::HandlePragmaPoison(Token& /*pragma_tok*/) {
   for (;;) {
     Token tok = cur_lexer_->Lex();
-    if (tok.GetKind() == TokenKind::kEod ||
-        tok.GetKind() == TokenKind::kEOF)
+    if (tok.GetKind() == TokenKind::kEod || tok.GetKind() == TokenKind::kEOF)
       break;
 
     if (tok.GetKind() != TokenKind::kIdentifier) {
@@ -915,7 +945,8 @@ void Preprocessor::HandlePragmaDependency() {
     if (filename_tok.GetKind() != TokenKind::kEod &&
         filename_tok.GetKind() != TokenKind::kEOF) {
       diags_.Report(filename_tok.GetLocation(),
-                    diag::err_pp_pragma_string_literal) << "dependency";
+                    diag::err_pp_pragma_string_literal)
+          << "dependency";
     }
     DiscardUntilEndOfDirective();
     return;
@@ -930,6 +961,7 @@ void Preprocessor::HandlePragmaDependency() {
   // Consume any remaining tokens.
   DiscardUntilEndOfDirective();
 
+  // TODO(gc):
   // For now, we accept the pragma silently since we don't have full
   // file-timestamp comparison wired up.
   (void)filename;
@@ -958,8 +990,8 @@ void Preprocessor::HandlePragmaDiagnostic() {
   }
 
   // error|warning|ignored|fatal <option>
-  if (cmd_name == "error" || cmd_name == "warning" ||
-      cmd_name == "ignored" || cmd_name == "fatal") {
+  if (cmd_name == "error" || cmd_name == "warning" || cmd_name == "ignored" ||
+      cmd_name == "fatal") {
     // Parse the -Wflag string literal.
     Token flag = cur_lexer_->Lex();
     // Silently accept (no diagnostic infrastructure yet).
@@ -1158,9 +1190,9 @@ void Preprocessor::HandleLineDirective(Token& line_tok) {
 
   // Anchor the override on the directive's own line (always a file location),
   // not the number token, which may have come from a macro or scratch buffer.
-  sm_.AddLineDirective(line_tok.GetLocation(), line_no,
-                       have_filename ? std::string_view{filename}
-                                     : std::string_view{});
+  sm_.AddLineDirective(
+      line_tok.GetLocation(), line_no,
+      have_filename ? std::string_view{filename} : std::string_view{});
 }
 
 void Preprocessor::HandleUserDiagnosticDirective(Token& tok, bool is_error) {
@@ -1224,7 +1256,8 @@ void Preprocessor::HandleIfDirective(Token& if_tok) {
 void Preprocessor::HandleIfdefDirective(Token& tok, bool is_ifndef) {
   bool at_file_scope = cur_lexer_->GetConditionalStackDepth() == 0;
   IdentifierInfo* name = nullptr;
-  bool defined = CheckIsMacroDefinedOperand(&name);  // consumes rest of the line
+  bool defined =
+      CheckIsMacroDefinedOperand(&name);  // consumes rest of the line
 
   // Include-guard tracking: a file-scope `#ifndef GUARD` is the candidate guard
   // opener; any other file-scope conditional breaks the guard shape.
@@ -1323,8 +1356,8 @@ void Preprocessor::SkipExcludedConditionalBlock() {
     Token tok = cur_lexer_->Lex();
 
     if (tok.GetKind() == TokenKind::kEOF) {
-      // Leave the open levels in place; HandleEndOfFile reports the unterminated
-      // conditional once, uniformly with the non-skipping case.
+      // Leave the open levels in place; HandleEndOfFile reports the
+      // unterminated conditional once, uniformly with the non-skipping case.
       return;
     }
 
@@ -1388,7 +1421,8 @@ void Preprocessor::SkipExcludedConditionalBlock() {
 
     if (kw == PPKeyword::kElif) {
       if (top.found_else || top.found_non_skip) {
-        if (callbacks_) callbacks_->Elif(dir.GetLocation(), /*condition=*/false);
+        if (callbacks_)
+          callbacks_->Elif(dir.GetLocation(), /*condition=*/false);
         DiscardUntilEndOfDirective();
         continue;
       }
@@ -1403,7 +1437,8 @@ void Preprocessor::SkipExcludedConditionalBlock() {
 
     if (kw == PPKeyword::kElifdef || kw == PPKeyword::kElifndef) {
       if (top.found_else || top.found_non_skip) {
-        if (callbacks_) callbacks_->Elif(dir.GetLocation(), /*condition=*/false);
+        if (callbacks_)
+          callbacks_->Elif(dir.GetLocation(), /*condition=*/false);
         DiscardUntilEndOfDirective();
         continue;
       }

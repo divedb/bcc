@@ -189,6 +189,10 @@ BufferedLexer::BufferedLexer(SourceManager& sm, FileID fid,
       has_leading_space_(false) {}
 
 Token BufferedLexer::NextToken() {
+  return NextToken(LexMode::kNormal);
+}
+
+Token BufferedLexer::NextToken(LexMode mode) {
   while (!cursor_.AtEnd() && *cursor_.Current() == '\0') {
     // Clang ignores raw NUL bytes in the source, but they still behave like
     // separating whitespace for the following token's LeadingSpace state.
@@ -207,7 +211,7 @@ Token BufferedLexer::NextToken() {
   }
 
   InitializeTokenFlags();
-  Token token = LexToken();
+  Token token = LexToken(mode);
   UpdateLexerState(token.GetKind());
 
   return token;
@@ -239,49 +243,22 @@ void BufferedLexer::UpdateLexerState(TokenKind kind) noexcept {
   }
 }
 
-Token BufferedLexer::LexIncludeFilename() noexcept {
-  // Skip horizontal whitespace only; a newline ends the directive line and is
-  // left for the caller (via the fallback path) to observe.
-  while (!cursor_.AtEnd() && IsWhitespace(
-                                 static_cast<unsigned char>(*cursor_.Current()))) {
-    has_leading_space_ = true;
-    cursor_.Advance();
-  }
+Token BufferedLexer::LexHeaderName(Cursor after_open, char close) noexcept {
+  // Scan on a copy so an unterminated name can fall back to the ordinary token
+  // beginning at the opening delimiter. Cursor::Next applies translation-phase
+  // line splicing and propagates kNeedsCleaning through FinalizeToken.
+  Cursor scan = after_open;
+  while (!scan.AtEnd()) {
+    DecodedChar ch = scan.Next();
 
-  InitializeTokenFlags();
-
-  if (cursor_.AtEnd()) return EOFToken();
-
-  const char open = *cursor_.Current();
-  if (open == '<' || open == '"') {
-    const char close = (open == '<') ? '>' : '"';
-
-    // Scan on a copy so the cursor is untouched if the name is unterminated.
-    Cursor scan = cursor_;
-    scan.Advance();  // consume the opening delimiter
-
-    while (!scan.AtEnd()) {
-      const char c = *scan.Current();
-
-      // A newline before the closing delimiter means the header name is
-      // unterminated; bail out and let the caller re-lex from the delimiter.
-      if (IsNewLine(static_cast<unsigned char>(c))) break;
-
-      scan.Advance();
-
-      if (c == close) {
-        Token token = FinalizeToken(TokenKind::kHeaderName, scan);
-        UpdateLexerState(TokenKind::kHeaderName);
-        return token;
-      }
+    if (ch.IsEOF() || IsNewLine(ch.codepoint)) break;
+    if (ch.codepoint == static_cast<uint32_t>(close)) {
+      return FinalizeToken(TokenKind::kHeaderName, scan);
     }
   }
 
-  // Not a header name (or unterminated): lex the next token normally so a
-  // computed include can be macro-expanded by the caller.
-  Token token = LexToken();
-  UpdateLexerState(token.GetKind());
-  return token;
+  if (close == '>') return LexPunctuator(after_open, '<');
+  return LexDelimitedLiteral(after_open, TokenKind::kStringLiteral, '"');
 }
 
 // 6.4.8 Preprocessing numbers
@@ -660,7 +637,7 @@ Token BufferedLexer::FinalizeToken(TokenKind kind, Cursor cursor) noexcept {
   return Token{loc, kind, start, length, current_token_flags_};
 }
 
-Token BufferedLexer::LexToken() noexcept {
+Token BufferedLexer::LexToken(LexMode mode) noexcept {
   Cursor lookahead = cursor_;
   DecodedChar ch = lookahead.Next();
 
@@ -678,6 +655,11 @@ Token BufferedLexer::LexToken() noexcept {
   if (IsWhitespace(cp)) return LexWhiteSpace(lookahead);
   if (IsNewLine(cp)) return LexNewLine(lookahead, cp);
   if (cp == '/') return LexCommentOrSlash(lookahead);
+
+  if (mode == LexMode::kHeaderName) {
+    if (cp == '<') return LexHeaderName(lookahead, '>');
+    if (cp == '"') return LexHeaderName(lookahead, '"');
+  }
 
   // Handle literals and potentially ambiguous literal-prefix characters
   // (u, U, L) that may also begin identifiers.

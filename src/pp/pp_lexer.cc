@@ -48,18 +48,26 @@ Token PPLexer::Lex() {
 }
 
 Token PPLexer::LexIncludeFilename() {
-  Token token = lexer_.LexIncludeFilename();
+  for (;;) {
+    Token token = lexer_.NextToken(BufferedLexer::LexMode::kHeaderName);
 
-  // If the filename was missing and the directive line ended, surface kEod
-  // exactly as Lex() would have.
-  if (parsing_preprocessor_directive_ &&
-      (token.GetKind() == TokenKind::kNewLine ||
-       token.GetKind() == TokenKind::kEOF)) {
-    parsing_preprocessor_directive_ = false;
-    return MakeEodToken(token);
+    switch (token.GetKind()) {
+      case TokenKind::kWhitespace:
+      case TokenKind::kComment:
+        continue;
+
+      case TokenKind::kNewLine:
+      case TokenKind::kEOF:
+        if (parsing_preprocessor_directive_) {
+          parsing_preprocessor_directive_ = false;
+          return MakeEodToken(token);
+        }
+        return token;
+
+      default:
+        return token;
+    }
   }
-
-  return token;
 }
 
 }  // namespace bcc

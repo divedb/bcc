@@ -36,6 +36,11 @@ class LexerBase {
 
 class BufferedLexer : public LexerBase {
  public:
+  enum class LexMode {
+    kNormal,
+    kHeaderName,
+  };
+
   /// \param diag  Optional diagnostics engine. When non-null, the lexer emits
   ///              structured diagnostics for malformed input instead of silently
   ///              returning kUnknown tokens.
@@ -44,29 +49,23 @@ class BufferedLexer : public LexerBase {
 
   Token NextToken() override;
 
+  /// \brief Returns the next preprocessing token using the requested lexical
+  /// mode.
+  ///
+  /// Header-name mode changes only the handling of an opening '<' or '"'. All
+  /// ordinary entry processing, including trivia, NUL bytes, conflict markers,
+  /// token flags, and EOF handling, remains shared with NextToken().
+  Token NextToken(LexMode mode);
+
   /// \brief Sets the leading-space flag that will be applied to the next token.
   void SetHasLeadingSpace(bool v) noexcept { has_leading_space_ = v; }
-
-  /// \brief Lexes an #include header-name token from the current position.
-  ///
-  /// Skips leading horizontal whitespace (but not newlines), then, if the next
-  /// character opens a header name, scans a single kHeaderName token:
-  ///   * `<...>` — an h-char-sequence terminated by the first '>' on the line,
-  ///   * `"..."` — a q-char-sequence terminated by the first '"' on the line
-  ///     (backslashes are literal, not escapes).
-  /// The returned lexeme includes the surrounding delimiters.
-  ///
-  /// If the next character does not open a header name (for example a computed
-  /// include such as `#include MACRO`), this falls back to NextToken() so the
-  /// caller can macro-expand. Unterminated header names also fall back, letting
-  /// the caller diagnose the stray '<' or '"'.
-  Token LexIncludeFilename() noexcept;
 
  private:
   void InitializeTokenFlags() noexcept;
   void UpdateLexerState(TokenKind kind) noexcept;
 
-  Token LexToken() noexcept;
+  Token LexToken(LexMode mode) noexcept;
+  Token LexHeaderName(Cursor cursor, char close) noexcept;
   Token LexNumericConstant(Cursor cursor) noexcept;
   Token LexPPNumberOrPeriod(Cursor cursor, uint32_t lead) noexcept;
   Token LexPunctuator(Cursor cursor, uint32_t lead) noexcept;

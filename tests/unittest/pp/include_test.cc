@@ -106,6 +106,16 @@ TEST_F(IncludeTest, ExpandsQuotedIncludeRelativeToIncluder) {
   EXPECT_FALSE(diags_->HasErrors());
 }
 
+TEST_F(IncludeTest, ResolvesLineSplicedHeaderName) {
+  WriteFile("foobar.h", "spliced\n");
+  SetMainFile("main.c", "#include <foo\\\nbar.h>\nafter\n");
+
+  auto pp = MakePP();
+  EXPECT_EQ(LexSpellings(*pp),
+            (std::vector<std::string>{"spliced", "after"}));
+  EXPECT_FALSE(diags_->HasErrors());
+}
+
 TEST_F(IncludeTest, PropagatesMacrosAcrossInclude) {
   WriteFile("def.h", "#define N 42\n");
   SetMainFile("main.c", "#include \"def.h\"\nint a = N;\n");
