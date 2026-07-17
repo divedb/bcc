@@ -143,8 +143,8 @@ enum class TokenKind : uint16_t {
   kHeaderName,  // <stdio.h> or "foo.h" in an #include directive
   kEod,         // End of a preprocessing directive (a directive's newline)
 
-  kUnknown,     // Any unrecognized token
-  kEOF,         // End of file/input
+  kUnknown,  // Any unrecognized token
+  kEOF,      // End of file/input
 };
 
 inline constexpr std::string_view kTokenKindNames[] = {
@@ -193,54 +193,54 @@ inline constexpr std::string_view kTokenKindNames[] = {
     "_Static_assert",  // kStaticAssert
     "_Thread_local",   // kThreadLocal
 
-    "l_square",              // kLSquare
-    "r_square",              // kRSquare
-    "l_paren",               // kLParen
-    "r_paren",               // kRParen
-    "l_brace",               // kLBrace
-    "r_brace",               // kRBrace
-    "period",                // kPeriod
-    "arrow",                 // kArrow
-    "plusplus",              // kPlusPlus
-    "minusminus",            // kMinusMinus
-    "amp",                   // kAmp
-    "star",                  // kStar
-    "plus",                  // kPlus
-    "minus",                 // kMinus
-    "tilde",                 // kTilde
-    "exclaim",               // kExclaim
-    "slash",                 // kSlash
-    "percent",               // kPercent
-    "lessless",              // kLessLess
-    "greatergreater",        // kGreaterGreater
-    "less",                  // kLess
-    "greater",               // kGreater
-    "lessequal",             // kLessEqual
-    "greaterequal",          // kGreaterEqual
-    "equalequal",            // kEqualEqual
-    "exclaimequal",          // kExclaimEqual
-    "caret",                 // kCaret
-    "pipe",                  // kPipe
-    "ampamp",                // kAmpAmp
-    "pipepipe",              // kPipePipe
-    "question",              // kQuestion
-    "colon",                 // kColon
-    "semi",                  // kSemi
-    "ellipsis",              // kEllipsis
-    "equal",                 // kEqual
-    "starequal",             // kStarEqual
-    "slashequal",            // kSlashEqual
-    "percentequal",          // kPercentEqual
-    "plusequal",             // kPlusEqual
-    "minusequal",            // kMinusEqual
-    "lesslessequal",         // kLessLessEqual
-    "greatergreaterequal",   // kGreaterGreaterEqual
-    "ampequal",              // kAmpEqual
-    "caretequal",            // kCaretEqual
-    "pipeequal",             // kPipeEqual
-    "comma",                 // kComma
-    "hash",                  // kHash
-    "hashhash",              // kHashHash
+    "l_square",             // kLSquare
+    "r_square",             // kRSquare
+    "l_paren",              // kLParen
+    "r_paren",              // kRParen
+    "l_brace",              // kLBrace
+    "r_brace",              // kRBrace
+    "period",               // kPeriod
+    "arrow",                // kArrow
+    "plusplus",             // kPlusPlus
+    "minusminus",           // kMinusMinus
+    "amp",                  // kAmp
+    "star",                 // kStar
+    "plus",                 // kPlus
+    "minus",                // kMinus
+    "tilde",                // kTilde
+    "exclaim",              // kExclaim
+    "slash",                // kSlash
+    "percent",              // kPercent
+    "lessless",             // kLessLess
+    "greatergreater",       // kGreaterGreater
+    "less",                 // kLess
+    "greater",              // kGreater
+    "lessequal",            // kLessEqual
+    "greaterequal",         // kGreaterEqual
+    "equalequal",           // kEqualEqual
+    "exclaimequal",         // kExclaimEqual
+    "caret",                // kCaret
+    "pipe",                 // kPipe
+    "ampamp",               // kAmpAmp
+    "pipepipe",             // kPipePipe
+    "question",             // kQuestion
+    "colon",                // kColon
+    "semi",                 // kSemi
+    "ellipsis",             // kEllipsis
+    "equal",                // kEqual
+    "starequal",            // kStarEqual
+    "slashequal",           // kSlashEqual
+    "percentequal",         // kPercentEqual
+    "plusequal",            // kPlusEqual
+    "minusequal",           // kMinusEqual
+    "lesslessequal",        // kLessLessEqual
+    "greatergreaterequal",  // kGreaterGreaterEqual
+    "ampequal",             // kAmpEqual
+    "caretequal",           // kCaretEqual
+    "pipeequal",            // kPipeEqual
+    "comma",                // kComma
+    "hash",                 // kHash
+    "hashhash",             // kHashHash
 
     "identifier",            // kIdentifier
     "char_constant",         // kCharConstant
@@ -295,6 +295,7 @@ inline constexpr TokenKind kLastKeyword = TokenKind::kThreadLocal;
 
 constexpr bool IsKeywordKind(TokenKind kind) noexcept {
   auto v = static_cast<uint16_t>(kind);
+
   return v >= static_cast<uint16_t>(kFirstKeyword) &&
          v <= static_cast<uint16_t>(kLastKeyword);
 }

@@ -33,10 +33,16 @@ inline constexpr TokenFlag& operator|=(TokenFlag& lhs, TokenFlag rhs) {
 
 class Token {
  public:
+  /// \brief Constructs a token with the given properties.
+  ///
+  /// \param loc    The source location of the first byte of this token's raw
+  ///               source text.
+  /// \param kind   The token kind.
   /// \param data   Pointer into the owning SourceManager's buffer at the first
   ///               byte of this token's raw source text. Not null-terminated.
   /// \param length Number of raw source bytes, including any backslash-newline
   ///               sequences (see NeedsCleaning()).
+  /// \param flag   Initial token flags.
   Token(SourceLocation loc, TokenKind kind, const char* data, uint32_t length,
         TokenFlag flag = TokenFlag::kNone)
       : data_(data), loc_(loc), length_(length), kind_(kind), flag_(flag) {}
@@ -44,31 +50,44 @@ class Token {
   SourceLocation GetLocation() const noexcept { return loc_; }
   TokenKind GetKind() const noexcept { return kind_; }
 
-  /// Overwrites the token kind. Used by the preprocessor to promote an
-  /// identifier token to its keyword kind after identifier lookup.
+  /// \brief Overwrites the token kind. Used by the preprocessor to promote an
+  ///        identifier token to its keyword kind after identifier lookup.
+  ///
+  /// \param kind The new token kind.
   void SetKind(TokenKind kind) noexcept { kind_ = kind; }
 
-  /// Overwrites the source location. Used by the TokenLexer to relocate a
-  /// macro's replacement tokens into their macro-expansion slots.
+  /// \brief Overwrites the source location. Used by the TokenLexer to relocate
+  ///        a macro's replacement tokens into their macro-expansion slots.
+  ///
+  /// \param loc The new source location.
   void SetLocation(SourceLocation loc) noexcept { loc_ = loc; }
 
   void SetFlag(TokenFlag flag) noexcept { flag_ |= flag; }
+
+  /// \brief Clears the given token flag.
+  ///
+  /// \param flag The token flag to clear.
   void ClearFlag(TokenFlag flag) noexcept {
     flag_ = static_cast<TokenFlag>(static_cast<uint8_t>(flag_) &
                                    ~static_cast<uint8_t>(flag));
   }
 
-  /// The interned identifier information for this token, or nullptr.
+  /// \brief The interned identifier information for this token, or nullptr.
   ///
   /// Set by the preprocessor (see Preprocessor::LookUpIdentifierInfo) for
   /// identifier and keyword tokens; nullptr for all other tokens and for any
   /// identifier that has not yet been looked up.
+  ///
+  /// \return The interned identifier information for this token, or nullptr.
   IdentifierInfo* GetIdentifierInfo() const noexcept { return ident_; }
   void SetIdentifierInfo(IdentifierInfo* info) noexcept { ident_ = info; }
 
-  /// Returns a view of the raw source bytes for this token. The view is valid
-  /// for the lifetime of the owning SourceManager. If NeedsCleaning() is true,
-  /// backslash-newline sequences must be stripped before the text is used.
+  /// \brief Returns a view of the raw source bytes for this token. The view is
+  ///        valid for the lifetime of the owning SourceManager. If
+  ///        NeedsCleaning() is true, backslash-newline sequences must be
+  ///        stripped before the text is used.
+  ///
+  /// \return A view of the raw source bytes for this token.
   std::string_view GetLexeme() const noexcept { return {data_, length_}; }
 
   bool IsStartOfLine() const noexcept {
@@ -92,10 +111,20 @@ class Token {
     return (flag_ & flag) != TokenFlag::kNone;
   }
 
-  SourceLocation loc_;  // global offset of data_[0]
-  const char* data_;    // non-owning pointer into SourceManager's buffer
-  IdentifierInfo* ident_ = nullptr;  // set by the preprocessor; see above
+  /// The source location of the first byte of this token's raw source text.
+  SourceLocation loc_;
+
+  /// Pointer into the owning SourceManager's buffer at the first byte of this
+  /// token's raw source text. Not null-terminated.
+  const char* data_;
+
+  /// The number of raw source bytes, including any backslash-newline sequences
+  /// (see NeedsCleaning()).
   uint32_t length_;
+
+  /// The interned identifier information for this token, or nullptr.
+  IdentifierInfo* ident_ = nullptr;
+
   TokenKind kind_;
   TokenFlag flag_;
 };

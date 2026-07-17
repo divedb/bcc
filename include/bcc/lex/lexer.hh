@@ -12,60 +12,42 @@ namespace bcc {
 class DiagnosticsEngine;
 class SourceManager;
 
-class LexerBase {
+class BufferedLexer {
  public:
-  LexerBase() = default;
-  LexerBase(const LexerBase&) = delete;
-  LexerBase& operator=(const LexerBase&) = delete;
-  LexerBase(LexerBase&&) = delete;
-  LexerBase& operator=(LexerBase&&) = delete;
-
-  virtual ~LexerBase() = default;
+  /// \param diag  Optional diagnostics engine. When non-null, the lexer emits
+  ///              structured diagnostics for malformed input instead of
+  ///              silently returning kUnknown tokens.
+  explicit BufferedLexer(SourceManager& sm, FileID fid,
+                         DiagnosticsEngine* diag = nullptr);
+  BufferedLexer(const BufferedLexer&) = delete;
+  BufferedLexer& operator=(const BufferedLexer&) = delete;
+  BufferedLexer(BufferedLexer&&) = delete;
+  BufferedLexer& operator=(BufferedLexer&&) = delete;
 
   /// \brief Returns the next preprocessing token from the input stream.
   ///
-  /// Implementations advance internal lexer state and return tokens in source
-  /// order until TokenKind::kEOF is reached. The returned token preserves its
-  /// original source spelling, including any whitespace, comments, or escaped
-  /// newlines that belong to that token.
-  ///
-  /// \return The next token in the input stream, or a token of kind kEOF when
-  ///         the end of the input is reached.
-  virtual Token NextToken() = 0;
-};
-
-class BufferedLexer : public LexerBase {
- public:
-  enum class LexMode {
-    kNormal,
-    kHeaderName,
-  };
-
-  /// \param diag  Optional diagnostics engine. When non-null, the lexer emits
-  ///              structured diagnostics for malformed input instead of silently
-  ///              returning kUnknown tokens.
-  explicit BufferedLexer(SourceManager& sm, FileID fid,
-                         DiagnosticsEngine* diag = nullptr);
-
-  Token NextToken() override;
-
-  /// \brief Returns the next preprocessing token using the requested lexical
-  /// mode.
-  ///
-  /// Header-name mode changes only the handling of an opening '<' or '"'. All
-  /// ordinary entry processing, including trivia, NUL bytes, conflict markers,
-  /// token flags, and EOF handling, remains shared with NextToken().
-  Token NextToken(LexMode mode);
+  /// Advances internal lexer state and returns tokens in source order until
+  /// TokenKind::kEOF is reached. The returned token preserves its original
+  /// source spelling, including any whitespace, comments, or escaped newlines
+  /// that belong to that token.
+  Token NextToken();
 
   /// \brief Sets the leading-space flag that will be applied to the next token.
   void SetHasLeadingSpace(bool v) noexcept { has_leading_space_ = v; }
 
  private:
+  friend class PPLexer;
+
+  /// Returns the next token, recognizing an opening '<' or '"' as the start of
+  /// a header name. This contextual entry point is restricted to PPLexer.
+  Token LexHeaderName();
+  Token Lex(bool recognize_header_name);
+
   void InitializeTokenFlags() noexcept;
   void UpdateLexerState(TokenKind kind) noexcept;
 
-  Token LexToken(LexMode mode) noexcept;
-  Token LexHeaderName(Cursor cursor, char close) noexcept;
+  Token LexToken(bool recognize_header_name) noexcept;
+  Token LexHeaderNameBody(Cursor cursor, char close) noexcept;
   Token LexNumericConstant(Cursor cursor) noexcept;
   Token LexPPNumberOrPeriod(Cursor cursor, uint32_t lead) noexcept;
   Token LexPunctuator(Cursor cursor, uint32_t lead) noexcept;
@@ -86,7 +68,10 @@ class BufferedLexer : public LexerBase {
   //===------------------------------------------------------------------===//
 
   // A byte range to skip over (the non-"ours" sections of a conflict block).
-  struct ConflictSkip { const char* start; const char* end; };
+  struct ConflictSkip {
+    const char* start;
+    const char* end;
+  };
 
   // If the cursor sits at the start of a pending conflict-skip range, advance
   // past it. Returns true if the cursor moved.
@@ -104,13 +89,13 @@ class BufferedLexer : public LexerBase {
   ///        look-ahead has been committed via FinalizeToken).
   SourceLocation CurrentTokenLoc() const noexcept;
 
-  SourceManager&     sm_;
-  FileID             fid_;
+  SourceManager& sm_;
+  FileID fid_;
   DiagnosticsEngine* diag_;
-  Cursor             cursor_;
-  TokenFlag          current_token_flags_;
-  bool               is_at_start_of_line_;
-  bool               has_leading_space_;
+  Cursor cursor_;
+  TokenFlag current_token_flags_;
+  bool is_at_start_of_line_;
+  bool has_leading_space_;
 };
 
 }  // namespace bcc

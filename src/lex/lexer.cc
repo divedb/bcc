@@ -14,10 +14,6 @@ namespace bcc {
 
 namespace {
 
-constexpr bool IsWhitespace(uint32_t ch) noexcept {
-  return ch == ' ' || ch == '\t' || ch == '\v' || ch == '\f';
-}
-
 constexpr bool IsEncodingPrefix(uint32_t ch) noexcept {
   return ch == 'u' || ch == 'U' || ch == 'L';
 }
@@ -188,11 +184,11 @@ BufferedLexer::BufferedLexer(SourceManager& sm, FileID fid,
       is_at_start_of_line_(true),
       has_leading_space_(false) {}
 
-Token BufferedLexer::NextToken() {
-  return NextToken(LexMode::kNormal);
-}
+Token BufferedLexer::NextToken() { return Lex(false); }
 
-Token BufferedLexer::NextToken(LexMode mode) {
+Token BufferedLexer::LexHeaderName() { return Lex(true); }
+
+Token BufferedLexer::Lex(bool recognize_header_name) {
   while (!cursor_.AtEnd() && *cursor_.Current() == '\0') {
     // Clang ignores raw NUL bytes in the source, but they still behave like
     // separating whitespace for the following token's LeadingSpace state.
@@ -202,16 +198,15 @@ Token BufferedLexer::NextToken(LexMode mode) {
   }
 
   // Skip over any conflict-marker sections we have reached.
-  while (ApplyConflictSkips()) {
-    // A conflict start marker may immediately follow another skip.
-  }
+  // A conflict start marker may immediately follow another skip.
+  while (ApplyConflictSkips());
+
   if (is_at_start_of_line_ && TryConflictMarker()) {
-    while (ApplyConflictSkips()) {
-    }
+    while (ApplyConflictSkips());
   }
 
   InitializeTokenFlags();
-  Token token = LexToken(mode);
+  Token token = LexToken(recognize_header_name);
   UpdateLexerState(token.GetKind());
 
   return token;
@@ -243,21 +238,24 @@ void BufferedLexer::UpdateLexerState(TokenKind kind) noexcept {
   }
 }
 
-Token BufferedLexer::LexHeaderName(Cursor after_open, char close) noexcept {
+Token BufferedLexer::LexHeaderNameBody(Cursor after_open, char close) noexcept {
   // Scan on a copy so an unterminated name can fall back to the ordinary token
   // beginning at the opening delimiter. Cursor::Next applies translation-phase
   // line splicing and propagates kNeedsCleaning through FinalizeToken.
   Cursor scan = after_open;
+
   while (!scan.AtEnd()) {
     DecodedChar ch = scan.Next();
 
     if (ch.IsEOF() || IsNewLine(ch.codepoint)) break;
+
     if (ch.codepoint == static_cast<uint32_t>(close)) {
       return FinalizeToken(TokenKind::kHeaderName, scan);
     }
   }
 
   if (close == '>') return LexPunctuator(after_open, '<');
+
   return LexDelimitedLiteral(after_open, TokenKind::kStringLiteral, '"');
 }
 
@@ -294,23 +292,27 @@ Token BufferedLexer::LexNumericConstant(Cursor cursor) noexcept {
       }
     }
 
-    if (cp == '\\' ) {
+    if (cp == '\\') {
       // A \uXXXX / \UXXXXXXXX UCN is part of the pp-number spelling (clang
       // keeps it literal even when it forms an invalid suffix).
       const char* p = candidate.Current();
+
       if (p < candidate.End() && (*p == 'u' || *p == 'U')) {
         int digits = (*p == 'u') ? 4 : 8;
         const char* h = p + 1;
         bool ok = (h + digits <= candidate.End());
+
         for (int k = 0; ok && k < digits; ++k) {
           ok = IsHexDigit(static_cast<unsigned char>(h[k]));
         }
+
         if (ok) {
           candidate.Advance(static_cast<std::size_t>(1 + digits));
           cursor = candidate;
           continue;
         }
       }
+
       break;
     }
 
@@ -464,7 +466,7 @@ Token BufferedLexer::LexIdentifier(Cursor cursor) noexcept {
 }
 
 // precondition: cursor is positioned after the opening delimiter (either ' or
-// ").
+//               ").
 //
 // Scans forward to find the matching closing delimiter, treating backslash as
 // an escape that skips one character. Returns the token with `kind` on success.
@@ -481,6 +483,7 @@ Token BufferedLexer::LexDelimitedLiteral(Cursor cursor, TokenKind kind,
 
     if (ch.codepoint == '\\') {
       if (!cursor.AtEnd()) cursor.Next();
+
       continue;
     }
 
@@ -496,6 +499,7 @@ Token BufferedLexer::LexDelimitedLiteral(Cursor cursor, TokenKind kind,
                                 : diag::err_unterminated_string_literal;
         diag_->Report(CurrentTokenLoc(), dk);
       }
+
       return FinalizeToken(TokenKind::kUnknown, saved);
     }
   }
@@ -507,6 +511,7 @@ Token BufferedLexer::LexDelimitedLiteral(Cursor cursor, TokenKind kind,
                             : diag::err_unterminated_string_literal;
     diag_->Report(CurrentTokenLoc(), dk);
   }
+
   return FinalizeToken(TokenKind::kUnknown, cursor);
 }
 
@@ -537,7 +542,10 @@ Token BufferedLexer::LexMultiLineComment(Cursor cursor) noexcept {
   }
 
   // Unterminated comment.
-  if (diag_) diag_->Report(CurrentTokenLoc(), diag::err_unterminated_block_comment);
+  if (diag_) {
+    diag_->Report(CurrentTokenLoc(), diag::err_unterminated_block_comment);
+  }
+
   return FinalizeToken(TokenKind::kUnknown, cursor);
 }
 
@@ -609,8 +617,7 @@ Token BufferedLexer::LexWhiteSpace(Cursor cursor) noexcept {
 }
 
 SourceLocation BufferedLexer::CurrentTokenLoc() const noexcept {
-  uint32_t offset =
-      static_cast<uint32_t>(cursor_.Current() - cursor_.Begin());
+  uint32_t offset = static_cast<uint32_t>(cursor_.Current() - cursor_.Begin());
   return sm_.GetLocForOffset(fid_, offset);
 }
 
@@ -637,7 +644,7 @@ Token BufferedLexer::FinalizeToken(TokenKind kind, Cursor cursor) noexcept {
   return Token{loc, kind, start, length, current_token_flags_};
 }
 
-Token BufferedLexer::LexToken(LexMode mode) noexcept {
+Token BufferedLexer::LexToken(bool recognize_header_name) noexcept {
   Cursor lookahead = cursor_;
   DecodedChar ch = lookahead.Next();
 
@@ -647,6 +654,7 @@ Token BufferedLexer::LexToken(LexMode mode) noexcept {
   // Next() has already advanced one byte past the bad lead byte.
   if (ch.IsInvalidUTF8()) {
     if (diag_) diag_->Report(CurrentTokenLoc(), diag::err_invalid_utf8);
+
     return FinalizeToken(TokenKind::kUnknown, lookahead);
   }
 
@@ -656,9 +664,9 @@ Token BufferedLexer::LexToken(LexMode mode) noexcept {
   if (IsNewLine(cp)) return LexNewLine(lookahead, cp);
   if (cp == '/') return LexCommentOrSlash(lookahead);
 
-  if (mode == LexMode::kHeaderName) {
-    if (cp == '<') return LexHeaderName(lookahead, '>');
-    if (cp == '"') return LexHeaderName(lookahead, '"');
+  if (recognize_header_name) {
+    if (cp == '<') return LexHeaderNameBody(lookahead, '>');
+    if (cp == '"') return LexHeaderNameBody(lookahead, '"');
   }
 
   // Handle literals and potentially ambiguous literal-prefix characters
@@ -689,19 +697,25 @@ Token BufferedLexer::LexToken(LexMode mode) noexcept {
           return LexIdentifier(lookahead);
         }
       }
+
       if (diag_) diag_->Report(CurrentTokenLoc(), diag::err_malformed_ucn);
+
       return FinalizeToken(TokenKind::kUnknown, before_ucn);
     }
 
     if (IsForbiddenUCNCodepoint(ucn.codepoint)) {
-      if (diag_)
+      if (diag_) {
         diag_->Report(CurrentTokenLoc(), diag::err_forbidden_ucn_codepoint);
+      }
+
       return FinalizeToken(TokenKind::kUnknown, lookahead);
     }
 
     if (!IsIdentifierStart(ucn.codepoint)) {
-      if (diag_)
+      if (diag_) {
         diag_->Report(CurrentTokenLoc(), diag::err_invalid_ucn_in_identifier);
+      }
+
       return FinalizeToken(TokenKind::kUnknown, lookahead);
     }
 
@@ -726,12 +740,17 @@ const char* NextLineStart(const char* p, const char* end) noexcept {
   while (p < end && *p != '\n') {
     if (*p == '\r') {
       ++p;
+
       if (p < end && *p == '\n') ++p;
+
       return p;
     }
+
     ++p;
   }
+
   if (p < end) ++p;  // past the '\n'
+
   return p;
 }
 
@@ -742,7 +761,9 @@ bool LineIsMarker(const char* p, const char* end, const char* marker,
                   std::size_t len) noexcept {
   if (static_cast<std::size_t>(end - p) < len) return false;
   if (std::memcmp(p, marker, len) != 0) return false;
+
   char c = (p + len < end) ? p[len] : '\n';
+
   return c == ' ' || c == '\t' || c == '\n' || c == '\r';
 }
 
@@ -750,14 +771,17 @@ bool LineIsMarker(const char* p, const char* end, const char* marker,
 
 bool BufferedLexer::ApplyConflictSkips() noexcept {
   const char* p = cursor_.Current();
+
   for (const auto& s : conflict_skips_) {
     if (p >= s.start && p < s.end) {
       cursor_.Advance(static_cast<std::size_t>(s.end - p));
       has_leading_space_ = true;
       is_at_start_of_line_ = true;
+
       return true;
     }
   }
+
   return false;
 }
 
@@ -770,21 +794,25 @@ bool BufferedLexer::TryConflictMarker() noexcept {
     const char* after_start = NextLineStart(p, end);
     const char* sep = nullptr;
     const char* endmk = nullptr;
+
     for (const char* l = after_start; l < end; l = NextLineStart(l, end)) {
-      if (sep == nullptr &&
-          (LineIsMarker(l, end, "|||||||", 7) ||
-           LineIsMarker(l, end, "=======", 7))) {
+      if (sep == nullptr && (LineIsMarker(l, end, "|||||||", 7) ||
+                             LineIsMarker(l, end, "=======", 7))) {
         sep = l;
       }
+
       if (LineIsMarker(l, end, ">>>>>>>", 7)) {
         endmk = l;
         break;
       }
     }
+
     cursor_.Advance(static_cast<std::size_t>(after_start - p));
+
     if (sep != nullptr && endmk != nullptr) {
       conflict_skips_.push_back({sep, NextLineStart(endmk, end)});
     }
+
     return true;
   }
 
@@ -793,21 +821,26 @@ bool BufferedLexer::TryConflictMarker() noexcept {
     const char* after_start = NextLineStart(p, end);
     const char* sep = nullptr;
     const char* endmk = nullptr;
+
     for (const char* l = after_start; l < end; l = NextLineStart(l, end)) {
       if (sep == nullptr && end - l >= 5 && std::memcmp(l, "====", 4) == 0 &&
           l[4] == ' ') {
         sep = l;
       }
+
       if (LineIsMarker(l, end, "<<<<", 4)) {
         endmk = l;
         break;
       }
     }
+
     cursor_.Advance(static_cast<std::size_t>(after_start - p));
+
     if (sep != nullptr) {
       const char* stop = (endmk != nullptr) ? NextLineStart(endmk, end) : end;
       conflict_skips_.push_back({sep, stop});
     }
+
     // No separator: just consume the start marker line; the rest is kept.
     return true;
   }

@@ -9,6 +9,10 @@ namespace bcc {
 
 constexpr bool IsSign(uint32_t cp) noexcept { return cp == '+' || cp == '-'; }
 
+constexpr bool IsWhitespace(uint32_t cp) noexcept {
+  return cp == ' ' || cp == '\t' || cp == '\v' || cp == '\f';
+}
+
 constexpr bool IsNewLine(uint32_t cp) noexcept {
   return cp == '\n' || cp == '\r';
 }
@@ -38,25 +42,35 @@ inline std::string RemoveLineSplices(std::string_view raw) {
 
   std::string out;
   out.reserve(raw.size());
+
   for (std::size_t i = 0; i < raw.size();) {
     if (raw[i] == '\\') {
       std::size_t newline = i + 1;
-      while (newline < raw.size() &&
-             (raw[newline] == ' ' || raw[newline] == '\t')) {
-        ++newline;
-      }
+
+      // C17 5.1.1.2 Translation phases
+      // Each instance of a backslash character (\) immediately followed by a
+      // new-line character is deleted, splicing physical source lines to form
+      // logical source lines. Only the last backslash on any physical source
+      // line shall be eligible for being part of such a splice. A source file
+      // that is not empty shall end in a new-line character, which shall not be
+      // immediately preceded by a backslash character before any such splicing
+      // takes place.
       if (newline < raw.size() &&
           IsNewLine(static_cast<unsigned char>(raw[newline]))) {
         const char first = raw[newline++];
+
         if (first == '\r' && newline < raw.size() && raw[newline] == '\n') {
           ++newline;
         }
+
         i = newline;
         continue;
       }
     }
+
     out += raw[i++];
   }
+
   return out;
 }
 
@@ -85,6 +99,7 @@ inline void AppendUtf8(uint32_t cp, std::string& out) {
 inline std::string DecodeIdentifierUCNs(std::string_view s) {
   std::string out;
   out.reserve(s.size());
+
   for (std::size_t i = 0; i < s.size();) {
     if (s[i] == '\\' && i + 1 < s.size() &&
         (s[i + 1] == 'u' || s[i + 1] == 'U')) {
@@ -92,21 +107,27 @@ inline std::string DecodeIdentifierUCNs(std::string_view s) {
       std::size_t j = i + 2;
       uint32_t cp = 0;
       bool ok = true;
+
       for (int k = 0; k < digits; ++k) {
-        if (j + k >= s.size() || !IsHexDigit(static_cast<unsigned char>(s[j + k]))) {
+        if (j + k >= s.size() ||
+            !IsHexDigit(static_cast<unsigned char>(s[j + k]))) {
           ok = false;
           break;
         }
+
         cp = (cp << 4) + HexDigitValue(static_cast<unsigned char>(s[j + k]));
       }
+
       if (ok) {
         AppendUtf8(cp, out);
         i = j + digits;
         continue;
       }
     }
+
     out += s[i++];
   }
+
   return out;
 }
 

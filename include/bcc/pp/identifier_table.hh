@@ -100,6 +100,7 @@ class IdentifierTable {
   /// Transparent hash so string_view lookups don't allocate a std::string.
   struct StringHash {
     using is_transparent = void;
+
     std::size_t operator()(std::string_view s) const noexcept {
       return std::hash<std::string_view>{}(s);
     }

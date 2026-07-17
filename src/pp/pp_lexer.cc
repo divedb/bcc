@@ -49,7 +49,7 @@ Token PPLexer::Lex() {
 
 Token PPLexer::LexIncludeFilename() {
   for (;;) {
-    Token token = lexer_.NextToken(BufferedLexer::LexMode::kHeaderName);
+    Token token = lexer_.LexHeaderName();
 
     switch (token.GetKind()) {
       case TokenKind::kWhitespace:
