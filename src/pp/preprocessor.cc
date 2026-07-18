@@ -23,8 +23,9 @@ namespace {
 /// Builds the __DATE__ ("Mmm dd yyyy") and __TIME__ ("hh:mm:ss") string
 /// literals, including surrounding quotes, from the current local time.
 void InitDateTimeLiterals(std::string& date_out, std::string& time_out) {
-  static const char* const kMonths[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun",
-                                         "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+  static const char* const kMonths[] = {"Jan", "Feb", "Mar", "Apr",
+                                        "May", "Jun", "Jul", "Aug",
+                                        "Sep", "Oct", "Nov", "Dec"};
   std::time_t now = std::time(nullptr);
   std::tm tm{};
 #if defined(_WIN32)
@@ -54,7 +55,8 @@ Preprocessor::Preprocessor(SourceManager& sm, DiagnosticsEngine& diags)
 
 Preprocessor::~Preprocessor() = default;
 
-void Preprocessor::SetPPCallbacks(std::unique_ptr<PPCallbacks> callbacks) noexcept {
+void Preprocessor::SetPPCallbacks(
+    std::unique_ptr<PPCallbacks> callbacks) noexcept {
   callbacks_ = std::move(callbacks);
 }
 
@@ -69,9 +71,8 @@ void Preprocessor::EnterSourceFile(FileID fid, SourceLocation /*include_loc*/) {
   EnterSourceFileWithLexer(std::make_unique<PPLexer>(sm_, fid, &diags_));
 }
 
-void Preprocessor::EnterIncludeFile(FileID fid, SourceLocation /*include_loc*/,
-                                    const FileEntry* fe) {
-  EnterSourceFileWithLexer(std::make_unique<PPLexer>(sm_, fid, &diags_, fe));
+void Preprocessor::EnterIncludeFile(FileID fid, SourceLocation /*include_loc*/) {
+  EnterSourceFileWithLexer(std::make_unique<PPLexer>(sm_, fid, &diags_));
 }
 
 void Preprocessor::EnterSourceFileWithLexer(std::unique_ptr<PPLexer> lexer) {
@@ -191,7 +192,8 @@ Token Preprocessor::Lex() {
   }
 
   // Once nothing is pending replay and no mark is active, the cache is dead.
-  if (backtrack_positions_.empty() && cached_lex_pos_ == cached_tokens_.size()) {
+  if (backtrack_positions_.empty() &&
+      cached_lex_pos_ == cached_tokens_.size()) {
     cached_tokens_.clear();
     cached_lex_pos_ = 0;
   }
@@ -228,6 +230,7 @@ bool Preprocessor::CheckPoisonedIdentifier(const IdentifierInfo* ii,
     diags_.Report(loc, diag::err_pp_poisoned_macro) << ii->GetName();
     return true;
   }
+
   return false;
 }
 
@@ -289,8 +292,9 @@ bool Preprocessor::HandleEndOfFile(const Token& eof_tok, Token& result) {
   // Record the include-guard controlling macro learned while lexing this file,
   // so a later #include of it can be skipped.
   if (header_search_ && cur_lexer_) {
-    if (const FileEntry* fe = cur_lexer_->GetFileEntry()) {
-      if (const IdentifierInfo* m = cur_lexer_->GetMIOpt().GetControllingMacro()) {
+    if (const FileEntry* fe = FileEntryOf(cur_lexer_.get())) {
+      if (const IdentifierInfo* m =
+              cur_lexer_->GetMIOpt().GetControllingMacro()) {
         header_search_->SetFileControllingMacro(fe, m);
       }
     }
@@ -325,6 +329,7 @@ IdentifierInfo* Preprocessor::LookUpIdentifierInfo(Token& tok) {
   // Promote to the keyword kind when the spelling is a keyword; a no-op
   // (kIdentifier -> kIdentifier) otherwise.
   tok.SetKind(info->GetTokenKind());
+
   return info;
 }
 
@@ -333,7 +338,15 @@ CharacteristicKind Preprocessor::CharacteristicOf(
   if (header_search_ == nullptr || lexer == nullptr) {
     return CharacteristicKind::kUser;
   }
-  return header_search_->GetFileCharacteristic(lexer->GetFileEntry());
+
+  return header_search_->GetFileCharacteristic(FileEntryOf(lexer));
+}
+
+const FileEntry* Preprocessor::FileEntryOf(const PPLexer* lexer) const noexcept {
+  if (lexer == nullptr || lexer->GetFileID() == sm_.GetMainFileID()) {
+    return nullptr;
+  }
+  return sm_.GetFileEntryForID(lexer->GetFileID());
 }
 
 CharacteristicKind Preprocessor::GetCurrentFileCharacteristic() const noexcept {

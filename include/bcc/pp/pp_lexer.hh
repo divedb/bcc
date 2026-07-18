@@ -12,7 +12,6 @@
 namespace bcc {
 
 class DiagnosticsEngine;
-class FileEntry;
 class IdentifierInfo;
 class SourceManager;
 
@@ -105,10 +104,13 @@ class MultipleIncludeOpt {
 struct PPConditionalInfo {
   /// Location of the #if / #ifdef / #ifndef that opened this level.
   SourceLocation if_loc;
+
   /// Whether tokens were already being skipped when this level was entered.
   bool was_skipping = false;
+
   /// Whether a non-skipped branch has been taken at this level yet.
   bool found_non_skip = false;
+
   /// Whether the #else clause of this level has been seen.
   bool found_else = false;
 };
@@ -132,11 +134,7 @@ struct PPConditionalInfo {
 /// an #include header-name (<...> or "...").
 class PPLexer {
  public:
-  /// \param fe The FileEntry this file was resolved from, or nullptr for the
-  ///           main file / in-memory buffers. Used by the multiple-include
-  ///           optimization to key per-header state.
-  PPLexer(SourceManager& sm, FileID fid, DiagnosticsEngine* diag = nullptr,
-          const FileEntry* fe = nullptr);
+  PPLexer(SourceManager& sm, FileID fid, DiagnosticsEngine* diag = nullptr);
 
   PPLexer(const PPLexer&) = delete;
   PPLexer& operator=(const PPLexer&) = delete;
@@ -161,9 +159,6 @@ class PPLexer {
   /// \brief Sets the leading-space flag applied to the next non-trivia token.
   void SetHasLeadingSpace(bool v) noexcept { lexer_.SetHasLeadingSpace(v); }
 
-  /// \brief The FileEntry this file was resolved from, or nullptr.
-  const FileEntry* GetFileEntry() const noexcept { return file_entry_; }
-
   /// \brief The include-guard controlling-macro detector for this file.
   MultipleIncludeOpt& GetMIOpt() noexcept { return mio_; }
 
@@ -179,6 +174,7 @@ class PPLexer {
   void SetParsingPreprocessorDirective(bool value) noexcept {
     parsing_preprocessor_directive_ = value;
   }
+
   bool IsParsingPreprocessorDirective() const noexcept {
     return parsing_preprocessor_directive_;
   }
@@ -192,6 +188,7 @@ class PPLexer {
     conditional_stack_.push_back(
         PPConditionalInfo{if_loc, was_skipping, found_non_skip, found_else});
   }
+
   void PushConditionalLevel(const PPConditionalInfo& info) {
     conditional_stack_.push_back(info);
   }
@@ -201,14 +198,17 @@ class PPLexer {
   /// \return True if the stack was empty (nothing popped, \p info untouched).
   bool PopConditionalLevel(PPConditionalInfo& info) {
     if (conditional_stack_.empty()) return true;
+
     info = conditional_stack_.back();
     conditional_stack_.pop_back();
+
     return false;
   }
 
   /// \pre The conditional stack is non-empty.
   PPConditionalInfo& PeekConditionalLevel() {
     assert(!conditional_stack_.empty() && "no conditional active");
+
     return conditional_stack_.back();
   }
 
@@ -223,7 +223,6 @@ class PPLexer {
 
   BufferedLexer lexer_;
   FileID fid_;
-  const FileEntry* file_entry_ = nullptr;
   MultipleIncludeOpt mio_;
   bool parsing_preprocessor_directive_ = false;
   std::vector<PPConditionalInfo> conditional_stack_;

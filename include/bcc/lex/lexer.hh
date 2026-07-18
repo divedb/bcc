@@ -14,11 +14,16 @@ class SourceManager;
 
 class BufferedLexer {
  public:
+  /// \brief Constructs a BufferedLexer for the given file.
+  ///
+  /// \param sm    The source manager that owns the file being lexed.
+  /// \param fid   The FileID of the file to lex.
   /// \param diag  Optional diagnostics engine. When non-null, the lexer emits
   ///              structured diagnostics for malformed input instead of
   ///              silently returning kUnknown tokens.
   explicit BufferedLexer(SourceManager& sm, FileID fid,
                          DiagnosticsEngine* diag = nullptr);
+
   BufferedLexer(const BufferedLexer&) = delete;
   BufferedLexer& operator=(const BufferedLexer&) = delete;
   BufferedLexer(BufferedLexer&&) = delete;

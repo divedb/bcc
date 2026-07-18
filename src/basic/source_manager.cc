@@ -279,6 +279,15 @@ std::string_view SourceManager::GetFilename(FileID fid) const noexcept {
   return GetContentCache(fid).buffer->GetBufferIdentifier();
 }
 
+const FileEntry* SourceManager::GetFileEntryForID(FileID fid) const noexcept {
+  if (!fid.IsValid()) return nullptr;
+
+  const SLocEntry& entry = GetSLocEntry(fid);
+  if (!entry.IsFile()) return nullptr;
+
+  return entry.GetFileInfo().cache->entry;
+}
+
 const char* SourceManager::GetCharacterData(SourceLocation loc) const noexcept {
   auto [fid, offset] = GetDecomposedSpellingLoc(loc);
 

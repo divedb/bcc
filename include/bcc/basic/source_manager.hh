@@ -197,6 +197,10 @@ class SourceManager {
   /// \brief Returns the identifier (filename or logical name) for \p fid.
   std::string_view GetFilename(FileID fid) const noexcept;
 
+  /// \brief Returns the FileEntry backing \p fid, or nullptr when the source
+  ///        is an in-memory buffer.
+  const FileEntry* GetFileEntryForID(FileID fid) const noexcept;
+
   /// \brief Returns a pointer to the character at \p loc.
   ///
   /// \note Macro expansion locations are resolved to their spelling location

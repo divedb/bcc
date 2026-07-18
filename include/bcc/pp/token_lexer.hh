@@ -64,26 +64,25 @@ class TokenLexer {
   bool HasUnconsumedLeadingSpace() const noexcept {
     if (num_tokens_ == 0)
       return first_token_has_leading_space_ || pending_leading_space_;
+
     return pending_leading_space_;
   }
+
   /// True when an empty expansion was at the start of a line, so that flag
   /// must propagate to the token following the expansion.
   bool HasUnconsumedStartOfLine() const noexcept {
     return num_tokens_ == 0 && first_token_at_start_of_line_;
   }
+
   MacroInfo* GetMacro() const noexcept { return macro_; }
 
   /// Mark the next token produced by Lex() to inherit a leading space. Used
   /// when a nested (child) expansion that had a leading space expanded to
   /// nothing: the space must flow to this lexer's following output token.
-  void InheritLeadingSpaceForNext() noexcept {
-    inherit_leading_space_ = true;
-  }
+  void InheritLeadingSpaceForNext() noexcept { inherit_leading_space_ = true; }
   /// As above, but for the start-of-line flag (an empty nested expansion at
   /// the start of a line must carry that onto the following token).
-  void InheritStartOfLineForNext() noexcept {
-    inherit_start_of_line_ = true;
-  }
+  void InheritStartOfLineForNext() noexcept { inherit_start_of_line_ = true; }
 
  private:
   /// Builds the substituted replacement list into owned_tokens_ for a

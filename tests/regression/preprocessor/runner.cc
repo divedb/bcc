@@ -11,10 +11,10 @@
 #include "bcc/basic/diagnostic.hh"
 #include "bcc/basic/file_manager.hh"
 #include "bcc/basic/source_manager.hh"
-#include "bcc/pp/header_search.hh"
-#include "bcc/pp/preprocessor.hh"
 #include "bcc/lex/token.hh"
 #include "bcc/lex/token_kind.hh"
+#include "bcc/pp/header_search.hh"
+#include "bcc/pp/preprocessor.hh"
 #include "gtest/gtest.h"
 
 namespace bcc {
@@ -33,14 +33,17 @@ static std::string StripLineMarkers(const std::string& s) {
   std::string out;
   std::size_t i = 0;
   const std::size_t n = s.size();
+
   while (i < n) {
     // Find the end of the current line.
     std::size_t e = s.find('\n', i);
     std::size_t line_end = (e == std::string::npos) ? n : e;  // exclusive
     // A line marker starts with "# <digits> ".
     std::size_t p = i;
+
     if (p < line_end && s[p] == '#') {
       ++p;
+
       if (p < line_end && s[p] == ' ') {
         ++p;
         std::size_t d = p;
@@ -85,6 +88,7 @@ static std::string CollapseBlankLines(const std::string& s) {
   out.reserve(s.size());
   std::size_t i = 0;
   const std::size_t n = s.size();
+
   while (i < n) {
     if (s[i] == '\n') {
       out += '\n';
@@ -93,6 +97,7 @@ static std::string CollapseBlankLines(const std::string& s) {
       out += s[i++];
     }
   }
+
   return out;
 }
 
@@ -102,6 +107,7 @@ static std::string TrimLines(const std::string& s) {
   std::istringstream stream(s);
   std::string line;
   bool has_content = false;
+
   while (std::getline(stream, line)) {
     while (!line.empty() && (line.back() == ' ' || line.back() == '\t'))
       line.pop_back();
@@ -109,8 +115,11 @@ static std::string TrimLines(const std::string& s) {
     has_content = true;
     out += line + "\n";
   }
+
   while (!out.empty() && out.back() == '\n') out.pop_back();
+
   if (!out.empty()) out += '\n';
+
   return out;
 }
 
@@ -121,6 +130,7 @@ static std::string Normalize(const std::string& s) {
   out = CollapseHorizontalWS(out);
   out = CollapseBlankLines(out);
   out = TrimLines(out);
+
   return out;
 }
 
@@ -138,10 +148,13 @@ static std::string RunClang(const fs::path& file, const fs::path& inc_dir) {
   // fread is binary-safe: fgets + std::string += (const char*) would truncate
   // the captured output at the first NUL byte (e.g. NULs in string literals).
   std::size_t n;
+
   while ((n = std::fread(buf, 1, sizeof(buf), pipe)) > 0) {
     result.append(buf, n);
   }
+
   pclose(pipe);
+
   return Normalize(result);
 }
 
@@ -162,6 +175,7 @@ struct BccResult {
 static bool WouldMerge(const Token& prev, const Token& next) {
   std::string_view prev_spelling = prev.GetLexeme();
   std::string_view next_spelling = next.GetLexeme();
+
   if (prev_spelling.empty() || next_spelling.empty()) return false;
 
   char p = prev_spelling.back();
@@ -179,9 +193,8 @@ static bool WouldMerge(const Token& prev, const Token& next) {
   // literal would re-lex as a single prefixed literal.
   if ((n == '"' || n == '\'') && !prev_spelling.empty()) {
     std::string_view pre = prev_spelling;
-    if (pre == "L" || pre == "u" || pre == "U" || pre == "u8" ||
-        pre == "R" || pre == "LR" || pre == "uR" || pre == "UR" ||
-        pre == "u8R") {
+    if (pre == "L" || pre == "u" || pre == "U" || pre == "u8" || pre == "R" ||
+        pre == "LR" || pre == "uR" || pre == "UR" || pre == "u8R") {
       return true;
     }
   }
@@ -191,12 +204,13 @@ static bool WouldMerge(const Token& prev, const Token& next) {
   // `<<` and `<<` (which stay two tokens) while inserting one between `<` and
   // `<` (which would form `<<`).
   static const std::unordered_set<std::string_view> kPunctuators = {
-      "<<=", ">>=", "...", "->", "++", "--", "<<", ">>", "<=", ">=", "==",
-      "!=", "&&", "||", "*=", "/=", "%=", "+=", "-=", "&=", "^=", "|=", "##"};
+      "<<=", ">>=", "...", "->", "++", "--", "<<", ">>", "<=", ">=", "==", "!=",
+      "&&",  "||",  "*=",  "/=", "%=", "+=", "-=", "&=", "^=", "|=", "##"};
   std::string cand;
   cand.reserve(prev_spelling.size() + 1);
   cand.append(prev_spelling);
   cand.push_back(n);
+
   if (kPunctuators.count(cand)) return true;
 
   return false;
@@ -206,22 +220,30 @@ static bool WouldMerge(const Token& prev, const Token& next) {
 // splice carry kNeedsCleaning; clang -E joins them, so bcc must too.
 static std::string CleanLexeme(const Token& t) {
   std::string_view raw = t.GetLexeme();
+
   // Clang decodes \uXXXX/\UXXXXXXXX UCNs in identifier spellings when printing
   // -E output; mirror that for identifier tokens.
   if (t.GetKind() == TokenKind::kIdentifier && !t.NeedsCleaning()) {
     return DecodeIdentifierUCNs(raw);
   }
+
   if (!t.NeedsCleaning()) return std::string(raw);
+
   std::string out;
   out.reserve(raw.size());
+
   for (std::size_t i = 0; i < raw.size();) {
     if (raw[i] == '\\' && i + 1 < raw.size()) {
       std::size_t j = i + 1;
+
       while (j < raw.size() && (raw[j] == ' ' || raw[j] == '\t')) ++j;
+
       if (j < raw.size() && (raw[j] == '\n' || raw[j] == '\r')) {
         char nl = raw[j];
         i = j + 1;
+
         if (nl == '\r' && i < raw.size() && raw[i] == '\n') ++i;
+
         continue;
       }
     }
@@ -297,8 +319,9 @@ class PreprocessorRegressionTest : public ::testing::TestWithParam<fs::path> {
     // of helper headers, and sibling .c files that may be #included) into the
     // temp dir so relative includes resolve identically for clang and bcc.
     fs::path src_dir = src_.parent_path();
-    fs::copy(src_dir, temp_dir_,
-             fs::copy_options::recursive | fs::copy_options::overwrite_existing);
+    fs::copy(
+        src_dir, temp_dir_,
+        fs::copy_options::recursive | fs::copy_options::overwrite_existing);
   }
 
   void TearDown() override { fs::remove_all(temp_dir_); }
@@ -326,9 +349,11 @@ TEST_P(PreprocessorRegressionTest, OutputMatchesClang) {
     std::istringstream a(clang_out), b(bcc.output);
     std::string la, lb;
     unsigned ln = 1;
+
     for (;;) {
       bool ea = !std::getline(a, la);
       bool eb = !std::getline(b, lb);
+
       if (ea && eb) break;
       if (ea) {
         std::cerr << ln << " > " << lb << "\n";
@@ -354,8 +379,11 @@ TEST_P(PreprocessorRegressionTest, OutputMatchesClang) {
 static auto DiscoverTests() {
   std::vector<fs::path> files;
   fs::path root(TEST_DATA_DIR);
+
   if (!fs::exists(root)) return files;
+
   const char* filter = std::getenv("BCC_PP_FILTER");
+
   for (auto& entry : fs::recursive_directory_iterator(root)) {
     if (entry.path().extension() == ".c") {
       if (filter == nullptr ||
@@ -363,7 +391,9 @@ static auto DiscoverTests() {
         files.push_back(entry.path());
     }
   }
+
   std::sort(files.begin(), files.end());
+
   return files;
 }
 

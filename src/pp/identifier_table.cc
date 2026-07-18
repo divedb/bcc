@@ -17,6 +17,7 @@ IdentifierInfo& IdentifierTable::Get(std::string_view name) {
   IdentifierInfo& info = it->second;
   // Point name_ at the stable key string owned by the node.
   info.name_ = it->first;
+
   return info;
 }
 

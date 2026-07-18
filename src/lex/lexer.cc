@@ -618,6 +618,7 @@ Token BufferedLexer::LexWhiteSpace(Cursor cursor) noexcept {
 
 SourceLocation BufferedLexer::CurrentTokenLoc() const noexcept {
   uint32_t offset = static_cast<uint32_t>(cursor_.Current() - cursor_.Begin());
+
   return sm_.GetLocForOffset(fid_, offset);
 }
 

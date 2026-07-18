@@ -326,15 +326,18 @@ void Preprocessor::HandleUndefDirective(Token& /*undef_tok*/) {
   }
 
   IdentifierInfo* ii = LookUpIdentifierInfo(name);
+
   if (cur_lexer_->GetConditionalStackDepth() == 0) {
     cur_lexer_->GetMIOpt().OtherTopLevelDirective();
   }
+
   DiscardUntilEndOfDirective();  // consume any trailing tokens + kEod
   AppendUndefMacroDirective(ii, name.GetLocation());
 }
 
 void Preprocessor::DiscardUntilEndOfDirective() {
   Token tok = cur_lexer_->Lex();
+
   while (tok.GetKind() != TokenKind::kEod && tok.GetKind() != TokenKind::kEOF) {
     tok = cur_lexer_->Lex();
   }
@@ -346,9 +349,12 @@ void Preprocessor::DiscardUntilEndOfDirective() {
 
 std::string_view Preprocessor::GetCurrentFileDir() const {
   if (!cur_lexer_) return {};
+
   std::string_view name = sm_.GetFilename(cur_lexer_->GetFileID());
   std::string_view::size_type slash = name.find_last_of('/');
+
   if (slash == std::string_view::npos) return {};
+
   return name.substr(0, slash);
 }
 
@@ -505,7 +511,7 @@ bool Preprocessor::HandleIncludeCommon(Token& include_tok, bool is_include_next,
   // tokens. We use a special flag to skip non-directive tokens. For now, we
   // enter the file normally. A more sophisticated implementation would skip
   // non-#define tokens, but for correctness the macros are still processed.
-  EnterIncludeFile(fid, filename_tok.GetLocation(), fe);
+  EnterIncludeFile(fid, filename_tok.GetLocation());
   return true;
 }
 
@@ -604,7 +610,7 @@ void Preprocessor::HandlePragmaDirective(Token& pragma_tok) {
   if (tok.GetKind() == TokenKind::kIdentifier &&
       LookUpIdentifierInfo(tok)->GetName() == "once") {
     if (header_search_ != nullptr) {
-      if (const FileEntry* fe = cur_lexer_->GetFileEntry()) {
+      if (const FileEntry* fe = FileEntryOf(cur_lexer_.get())) {
         header_search_->MarkFileIncludeOnce(fe);
       }
     }
@@ -687,7 +693,7 @@ void Preprocessor::HandleGCCOrClangPragma(Token& pragma_tok, Token& ns_tok) {
     // lookups, the InclusionDirective callback, and IsInSystemHeader() all see
     // it; GetCurrentFileCharacteristic() reads the same record.
     if (header_search_ != nullptr) {
-      if (const FileEntry* fe = cur_lexer_->GetFileEntry()) {
+      if (const FileEntry* fe = FileEntryOf(cur_lexer_.get())) {
         header_search_->MarkFileAsSystemHeader(fe);
       }
     }

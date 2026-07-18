@@ -407,11 +407,8 @@ class Preprocessor {
   // Lexer stack management.
   //===--------------------------------------------------------------------===//
 
-  /// Pushes \p fid (resolved from \p fe) onto the lexer stack in response to an
-  /// #include, recording the FileEntry so the multiple-include optimization can
-  /// key off it.
-  void EnterIncludeFile(FileID fid, SourceLocation include_loc,
-                        const FileEntry* fe);
+  /// Pushes \p fid onto the lexer stack in response to an #include.
+  void EnterIncludeFile(FileID fid, SourceLocation include_loc);
 
   void EnterSourceFileWithLexer(std::unique_ptr<PPLexer> lexer);
   void EnterTokenStream(std::unique_ptr<TokenLexer> token_lexer);
@@ -426,6 +423,10 @@ class Preprocessor {
   ///        kUser if the file has no FileEntry (main / in-memory file) or no
   ///        HeaderSearch is configured.
   CharacteristicKind CharacteristicOf(const PPLexer* lexer) const noexcept;
+
+  /// Returns the file backing \p lexer. The main file is intentionally
+  /// excluded because header-search state applies only to included files.
+  const FileEntry* FileEntryOf(const PPLexer* lexer) const noexcept;
 
   /// One suspended lexer on the stack. Exactly one of lexer / token_lexer is
   /// non-null, matching which callback was active.

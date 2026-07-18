@@ -2,9 +2,8 @@
 
 namespace bcc {
 
-PPLexer::PPLexer(SourceManager& sm, FileID fid, DiagnosticsEngine* diag,
-                 const FileEntry* fe)
-    : lexer_(sm, fid, diag), fid_(fid), file_entry_(fe) {}
+PPLexer::PPLexer(SourceManager& sm, FileID fid, DiagnosticsEngine* diag)
+    : lexer_(sm, fid, diag), fid_(fid) {}
 
 Token PPLexer::MakeEodToken(const Token& trivia) noexcept {
   // A zero-length marker at the terminating newline (or EOF). Its flags are
@@ -27,8 +26,10 @@ Token PPLexer::Lex() {
       case TokenKind::kNewLine:
         if (parsing_preprocessor_directive_) {
           parsing_preprocessor_directive_ = false;
+
           return MakeEodToken(token);
         }
+
         continue;  // Trivia outside a directive.
 
       case TokenKind::kEOF:
@@ -37,8 +38,10 @@ Token PPLexer::Lex() {
           // the end-of-directive marker; the next Lex() returns the EOF token,
           // which the underlying lexer produces idempotently.
           parsing_preprocessor_directive_ = false;
+
           return MakeEodToken(token);
         }
+
         return token;
 
       default:
