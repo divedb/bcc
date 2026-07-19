@@ -31,6 +31,7 @@ class MacroInfo {
   void AddReplacementToken(const Token& token) {
     replacement_tokens_.push_back(token);
   }
+
   void SetDefinitionEndLoc(SourceLocation loc) noexcept {
     definition_end_loc_ = loc;
   }
@@ -43,6 +44,7 @@ class MacroInfo {
   const std::vector<Token>& GetReplacementTokens() const noexcept {
     return replacement_tokens_;
   }
+
   unsigned GetNumTokens() const noexcept {
     return static_cast<unsigned>(replacement_tokens_.size());
   }
@@ -72,6 +74,7 @@ class MacroInfo {
   const std::vector<IdentifierInfo*>& GetParameters() const noexcept {
     return parameters_;
   }
+
   unsigned GetNumParams() const noexcept {
     return static_cast<unsigned>(parameters_.size());
   }
@@ -81,6 +84,7 @@ class MacroInfo {
     for (unsigned i = 0; i < parameters_.size(); ++i) {
       if (parameters_[i] == ii) return static_cast<int>(i);
     }
+
     return -1;
   }
 
@@ -127,14 +131,14 @@ class MacroInfo {
 /// and for #pragma push_macro/pop_macro later.
 class MacroDirective {
  public:
-  enum class Kind : uint8_t { Define, Undefine };
+  enum class Kind : uint8_t { kDefine, kUndefine };
 
   MacroDirective(Kind kind, MacroInfo* info, SourceLocation loc,
                  MacroDirective* previous)
       : previous_(previous), info_(info), loc_(loc), kind_(kind) {}
 
   Kind GetKind() const noexcept { return kind_; }
-  bool IsDefinition() const noexcept { return kind_ == Kind::Define; }
+  bool IsDefinition() const noexcept { return kind_ == Kind::kDefine; }
 
   /// The defined macro, or nullptr for an #undef directive.
   MacroInfo* GetMacroInfo() const noexcept { return info_; }

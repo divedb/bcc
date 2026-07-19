@@ -1,3 +1,5 @@
+#include <sys/stat.h>
+
 #include <cstddef>
 #include <cstdint>
 #include <ctime>
@@ -5,21 +7,20 @@
 #include <optional>
 #include <string>
 #include <string_view>
-#include <sys/stat.h>
 #include <utility>
 #include <vector>
 
 #include "bcc/basic/diagnostic.hh"
 #include "bcc/basic/diagnostic_ids.hh"
 #include "bcc/basic/source_manager.hh"
-#include "bcc/pp/identifier_table.hh"
 #include "bcc/lex/lexer.hh"
+#include "bcc/lex/token_kind.hh"
+#include "bcc/pp/identifier_table.hh"
 #include "bcc/pp/macro_args.hh"
 #include "bcc/pp/macro_info.hh"
 #include "bcc/pp/pp_callbacks.hh"
 #include "bcc/pp/preprocessor.hh"
 #include "bcc/pp/scratch_buffer.hh"
-#include "bcc/lex/token_kind.hh"
 #include "bcc/pp/token_lexer.hh"
 
 namespace bcc {
@@ -39,7 +40,7 @@ void Preprocessor::AppendDefMacroDirective(IdentifierInfo* ii, MacroInfo* macro,
   MacroDirective* previous = (it != macros_.end()) ? it->second : nullptr;
 
   macro_directives_.push_back(std::make_unique<MacroDirective>(
-      MacroDirective::Kind::Define, macro, loc, previous));
+      MacroDirective::Kind::kDefine, macro, loc, previous));
   macros_[ii] = macro_directives_.back().get();
   ii->SetHasMacroDefinition(true);
 
@@ -52,7 +53,7 @@ void Preprocessor::AppendUndefMacroDirective(IdentifierInfo* ii,
   MacroDirective* previous = (it != macros_.end()) ? it->second : nullptr;
 
   macro_directives_.push_back(std::make_unique<MacroDirective>(
-      MacroDirective::Kind::Undefine, nullptr, loc, previous));
+      MacroDirective::Kind::kUndefine, nullptr, loc, previous));
   macros_[ii] = macro_directives_.back().get();
   ii->SetHasMacroDefinition(false);
 
@@ -70,7 +71,8 @@ MacroInfo* Preprocessor::GetMacroInfo(const IdentifierInfo* ii) const {
 }
 
 void Preprocessor::ForEachDefinedMacro(
-    std::function<void(const IdentifierInfo*, const MacroInfo*)> visitor) const {
+    std::function<void(const IdentifierInfo*, const MacroInfo*)> visitor)
+    const {
   for (const auto& [ii, md] : macros_) {
     if (md != nullptr && md->IsDefinition() && md->GetMacroInfo() != nullptr) {
       visitor(ii, md->GetMacroInfo());
@@ -92,24 +94,24 @@ IdentifierInfo* Preprocessor::RegisterBuiltin(const char* name) {
 }
 
 void Preprocessor::RegisterBuiltinMacros() {
-  ident_line_           = RegisterBuiltin("__LINE__");
-  ident_file_           = RegisterBuiltin("__FILE__");
-  ident_date_           = RegisterBuiltin("__DATE__");
-  ident_time_           = RegisterBuiltin("__TIME__");
-  ident_counter_        = RegisterBuiltin("__COUNTER__");
-  ident_include_level_  = RegisterBuiltin("__INCLUDE_LEVEL__");
-  ident_stdc_           = RegisterBuiltin("__STDC__");
-  ident_stdc_hosted_    = RegisterBuiltin("__STDC_HOSTED__");
-  ident_stdc_version_   = RegisterBuiltin("__STDC_VERSION__");
-  ident_base_file_      = RegisterBuiltin("__BASE_FILE__");
-  ident_file_name_      = RegisterBuiltin("__FILE_NAME__");
-  ident_timestamp_      = RegisterBuiltin("__TIMESTAMP__");
+  ident_line_ = RegisterBuiltin("__LINE__");
+  ident_file_ = RegisterBuiltin("__FILE__");
+  ident_date_ = RegisterBuiltin("__DATE__");
+  ident_time_ = RegisterBuiltin("__TIME__");
+  ident_counter_ = RegisterBuiltin("__COUNTER__");
+  ident_include_level_ = RegisterBuiltin("__INCLUDE_LEVEL__");
+  ident_stdc_ = RegisterBuiltin("__STDC__");
+  ident_stdc_hosted_ = RegisterBuiltin("__STDC_HOSTED__");
+  ident_stdc_version_ = RegisterBuiltin("__STDC_VERSION__");
+  ident_base_file_ = RegisterBuiltin("__BASE_FILE__");
+  ident_file_name_ = RegisterBuiltin("__FILE_NAME__");
+  ident_timestamp_ = RegisterBuiltin("__TIMESTAMP__");
   ident_flt_eval_method_ = RegisterBuiltin("__FLT_EVAL_METHOD__");
-  ident_pragma_         = RegisterBuiltin("_Pragma");
+  ident_pragma_ = RegisterBuiltin("_Pragma");
   ident_bitint_maxwidth_ = RegisterBuiltin("__BITINT_MAXWIDTH__");
-  ident_char16_type_    = RegisterBuiltin("__CHAR16_TYPE__");
-  ident_char32_type_    = RegisterBuiltin("__CHAR32_TYPE__");
-  ident_wchar_max_      = RegisterBuiltin("__WCHAR_MAX__");
+  ident_char16_type_ = RegisterBuiltin("__CHAR16_TYPE__");
+  ident_char32_type_ = RegisterBuiltin("__CHAR32_TYPE__");
+  ident_wchar_max_ = RegisterBuiltin("__WCHAR_MAX__");
 }
 
 namespace {
@@ -126,12 +128,26 @@ std::string MakeStringLiteral(std::string_view s) {
   return out;
 }
 
+/// One-past-end location of a builtin macro name in its caller. Byte
+/// arithmetic is only valid for file locations; nested macro invocations use
+/// a zero-length range.
+SourceLocation ComputeInvocationEnd(SourceManager& sm, const Token& name) {
+  SourceLocation start = name.GetLocation();
+  if (start.IsMacroExpansion()) return start;
+
+  auto [fid, offset] = sm.GetDecomposedLoc(start);
+  return sm.GetLocForOffset(
+      fid, offset + static_cast<uint32_t>(name.GetLexeme().size()));
+}
+
 }  // namespace
 
 void Preprocessor::ExpandBuiltinMacro(Token& tok) {
   IdentifierInfo* ii = tok.GetIdentifierInfo();
 
   std::string spelling;
+  SourceLocation spelling_loc;
+  const char* data = nullptr;
   TokenKind kind = TokenKind::kNumericConstant;
 
   if (ii == ident_line_) {
@@ -142,7 +158,8 @@ void Preprocessor::ExpandBuiltinMacro(Token& tok) {
   } else if (ii == ident_file_) {
     kind = TokenKind::kStringLiteral;
     PresumedLoc pl = sm_.GetPresumedLoc(sm_.GetExpansionLoc(tok.GetLocation()));
-    spelling = MakeStringLiteral(pl.IsValid() ? pl.filename : std::string_view{});
+    spelling =
+        MakeStringLiteral(pl.IsValid() ? pl.filename : std::string_view{});
   } else if (ii == ident_counter_) {
     spelling = std::to_string(counter_++);
   } else if (ii == ident_include_level_) {
@@ -153,10 +170,12 @@ void Preprocessor::ExpandBuiltinMacro(Token& tok) {
     spelling = std::to_string(level);
   } else if (ii == ident_date_) {
     kind = TokenKind::kStringLiteral;
-    spelling = date_literal_;
+    EnsureDateTimeTokens();
+    spelling_loc = date_loc_;
   } else if (ii == ident_time_) {
     kind = TokenKind::kStringLiteral;
-    spelling = time_literal_;
+    EnsureDateTimeTokens();
+    spelling_loc = time_loc_;
   } else if (ii == ident_stdc_) {
     spelling = "1";
   } else if (ii == ident_stdc_hosted_) {
@@ -165,12 +184,17 @@ void Preprocessor::ExpandBuiltinMacro(Token& tok) {
     spelling = "201112L";
   } else if (ii == ident_base_file_) {
     kind = TokenKind::kStringLiteral;
-    spelling = MakeStringLiteral(base_file_name_);
+    PresumedLoc pl = sm_.GetPresumedLoc(sm_.GetExpansionLoc(tok.GetLocation()));
+    while (pl.IsValid() && pl.include_loc.IsValid()) {
+      pl = sm_.GetPresumedLoc(pl.include_loc);
+    }
+    spelling =
+        MakeStringLiteral(pl.IsValid() ? pl.filename : std::string_view{});
   } else if (ii == ident_file_name_) {
     kind = TokenKind::kStringLiteral;
     PresumedLoc pl = sm_.GetPresumedLoc(sm_.GetExpansionLoc(tok.GetLocation()));
-    std::string_view full = pl.IsValid() ? std::string_view{pl.filename}
-                                         : std::string_view{};
+    std::string_view full =
+        pl.IsValid() ? std::string_view{pl.filename} : std::string_view{};
     std::string_view::size_type slash = full.find_last_of('/');
     std::string_view basename =
         (slash == std::string_view::npos) ? full : full.substr(slash + 1);
@@ -215,14 +239,26 @@ void Preprocessor::ExpandBuiltinMacro(Token& tok) {
     return;
   }
 
-  const char* data = nullptr;
-  SourceLocation loc = scratch_.GetToken(spelling, data);
+  uint32_t length;
+  if (spelling_loc.IsValid()) {
+    FileID fid = sm_.GetFileID(spelling_loc);
+    std::string_view cached = sm_.GetBufferData(fid);
+    data = cached.data();
+    length = static_cast<uint32_t>(cached.size());
+  } else {
+    spelling_loc = scratch_.GetToken(spelling, data);
+    length = static_cast<uint32_t>(spelling.size());
+  }
+
+  FileID expansion_fid = sm_.CreateExpansionLoc(
+      spelling_loc, tok.GetLocation(), ComputeInvocationEnd(sm_, tok), 1);
+  SourceLocation loc = sm_.GetLocForStartOfFile(expansion_fid);
 
   TokenFlag flags = TokenFlag::kNone;
   if (tok.IsStartOfLine()) flags |= TokenFlag::kStartOfLine;
   if (tok.HasLeadingSpace()) flags |= TokenFlag::kLeadingSpace;
 
-  tok = Token(loc, kind, data, static_cast<uint32_t>(spelling.size()), flags);
+  tok = Token(loc, kind, data, length, flags);
 }
 
 //===----------------------------------------------------------------------===//
@@ -236,7 +272,8 @@ bool Preprocessor::HandleIdentifier(Token& tok) {
   // Check for poisoned identifiers before attempting macro expansion.
   IdentifierInfo* ii = tok.GetIdentifierInfo();
   if (ii != nullptr && poisoned_identifiers_.count(ii) > 0) {
-    diags_.Report(tok.GetLocation(), diag::err_pp_poisoned_macro) << ii->GetName();
+    diags_.Report(tok.GetLocation(), diag::err_pp_poisoned_macro)
+        << ii->GetName();
     // Do not expand; the token is still produced.
     return false;
   }
@@ -262,7 +299,8 @@ bool Preprocessor::HandleIdentifier(Token& tok) {
       bool is_call = (next.GetKind() == TokenKind::kLParen);
       // Push the peeked token back so the evaluator (or the normal path) sees
       // it. An EOF/Eod sentinel is idempotent and need not be requeued.
-      if (next.GetKind() != TokenKind::kEOF && next.GetKind() != TokenKind::kEod) {
+      if (next.GetKind() != TokenKind::kEOF &&
+          next.GetKind() != TokenKind::kEod) {
         EnterTokenStream(std::vector<Token>{next});
       }
       if (is_call) {
@@ -419,12 +457,13 @@ std::vector<Token> Preprocessor::ExpandArgument(
   std::vector<Token> result;
   if (arg_tokens.empty()) return result;
 
-  // Append an EOF sentinel that bounds this stream. If the argument's last token
-  // is a function-like macro name, the '(' look-ahead (IsNextTokenLParen) must
-  // not scan past the argument into the caller's input: it should see
+  // Append an EOF sentinel that bounds this stream. If the argument's last
+  // token is a function-like macro name, the '(' look-ahead (IsNextTokenLParen)
+  // must not scan past the argument into the caller's input: it should see
   // end-of-argument and leave the macro unexpanded, matching gcc/clang. Without
   // the sentinel the look-ahead pops this exhausted lexer and pulls tokens from
-  // the enclosing stream (e.g. the next source line) into the expanded argument.
+  // the enclosing stream (e.g. the next source line) into the expanded
+  // argument.
   std::vector<Token> stream = arg_tokens;
   stream.push_back(Token{SourceLocation{}, TokenKind::kEOF, nullptr, 0u});
 
@@ -452,22 +491,6 @@ std::vector<Token> Preprocessor::ExpandArgument(
 // TokenLexer
 //===----------------------------------------------------------------------===//
 
-namespace {
-
-/// One-past-end location of the macro-name token in the caller. Byte arithmetic
-/// only makes sense for file locations; for a name that itself came from a
-/// macro expansion (token-index space) we fall back to a zero-length range.
-SourceLocation ComputeInvocationEnd(SourceManager& sm, const Token& name) {
-  SourceLocation start = name.GetLocation();
-  if (start.IsMacroExpansion()) return start;
-
-  auto [fid, offset] = sm.GetDecomposedLoc(start);
-  return sm.GetLocForOffset(
-      fid, offset + static_cast<uint32_t>(name.GetLexeme().size()));
-}
-
-}  // namespace
-
 TokenLexer::TokenLexer(const Token& macro_name_tok, MacroInfo* macro,
                        MacroArgs* args, Preprocessor& pp)
     : pp_(pp), macro_(macro) {
@@ -485,8 +508,8 @@ TokenLexer::TokenLexer(const Token& macro_name_tok, MacroInfo* macro,
   }
 
   SourceManager& sm = pp_.GetSourceManager();
-  SourceLocation spelling = num_tokens_ > 0 ? tokens_[0].GetLocation()
-                                            : macro_->GetDefinitionLoc();
+  SourceLocation spelling =
+      num_tokens_ > 0 ? tokens_[0].GetLocation() : macro_->GetDefinitionLoc();
   SourceLocation expansion_start = macro_name_tok.GetLocation();
   SourceLocation expansion_end = ComputeInvocationEnd(sm, macro_name_tok);
   expansion_fid_ =
@@ -617,7 +640,6 @@ void TokenLexer::BuildExpansion(MacroArgs* args) {
         cur.GetKind() == TokenKind::kIdentifier &&
         cur.GetIdentifierInfo() != nullptr &&
         cur.GetIdentifierInfo()->GetPPKeyword() == PPKeyword::kVAOpt) {
-
       // Must be followed by '('.
       if (i + 1 < body.size() && body[i + 1].GetKind() == TokenKind::kLParen) {
         std::vector<Token> va_content;
@@ -699,14 +721,14 @@ void TokenLexer::BuildExpansion(MacroArgs* args) {
     bool adjacent_paste = false;
     if (pidx >= 0 && args != nullptr) {
       adjacent_paste =
-          pending_paste ||
-          (i + 1 < body.size() && body[i + 1].GetKind() == TokenKind::kHashHash);
+          pending_paste || (i + 1 < body.size() &&
+                            body[i + 1].GetKind() == TokenKind::kHashHash);
       produced = adjacent_paste ? args->GetUnexpArgument(pidx)
                                 : args->GetExpandedArgument(pidx, pp_);
       // When a parameter with leading space expands to nothing, remember the
       // spacing so the next emitted token inherits it (prevents gluing). A
-      // parameter that is an operand of "##" is excluded: an empty (placemarker)
-      // paste operand does not contribute a propagating space.
+      // parameter that is an operand of "##" is excluded: an empty
+      // (placemarker) paste operand does not contribute a propagating space.
       if (produced.empty() && cur.HasLeadingSpace() && !adjacent_paste) {
         pending_leading_space_ = true;
       }

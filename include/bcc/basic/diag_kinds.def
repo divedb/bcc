@@ -50,6 +50,10 @@ DIAG(err_pp_division_by_zero, kError, "",
      "division by zero in preprocessor expression")
 DIAG(err_pp_floating_constant, kError, "",
      "floating point constant in preprocessor expression")
+DIAG(err_pp_invalid_integer_constant, kError, "",
+     "invalid integer constant in preprocessor expression")
+DIAG(err_pp_integer_constant_too_large, kError, "",
+     "integer constant is too large for preprocessor expression")
 DIAG(err_pp_expected_macro_name, kError, "",
      "macro name missing")
 DIAG(err_pp_endif_without_if, kError, "",

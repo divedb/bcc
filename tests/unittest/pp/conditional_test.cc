@@ -5,8 +5,8 @@
 #include "bcc/basic/diagnostic.hh"
 #include "bcc/basic/file_manager.hh"
 #include "bcc/basic/source_manager.hh"
-#include "bcc/pp/preprocessor.hh"
 #include "bcc/lex/token_kind.hh"
+#include "bcc/pp/preprocessor.hh"
 #include "gtest/gtest.h"
 
 namespace bcc {
@@ -77,6 +77,21 @@ TEST_F(ConditionalTest, UnsignedComparison) {
   EXPECT_EQ(Run("#if -1 > 0\nsigned\n#else\nno\n#endif\n"), (V{"no"}));
 }
 
+TEST_F(ConditionalTest, UnsuffixedHexSelectsUintmax) {
+  EXPECT_EQ(Run("#if 0xffffffffffffffff > 0\nok\n#endif\n"), (V{"ok"}));
+  EXPECT_EQ(diags_.NumErrors(), 0u);
+}
+
+TEST_F(ConditionalTest, InvalidIntegerConstantsAreDiagnosed) {
+  Run("#if 4uu\n#endif\n");
+  EXPECT_EQ(diags_.NumErrors(), 1u);
+}
+
+TEST_F(ConditionalTest, IntegerOverflowIsDiagnosed) {
+  Run("#if 0xfffffffffffffffff\n#endif\n");
+  EXPECT_EQ(diags_.NumErrors(), 1u);
+}
+
 TEST_F(ConditionalTest, UndefinedIdentifierIsZero) {
   EXPECT_EQ(Run("#if UNDEFINED\nno\n#else\nyes\n#endif\n"), (V{"yes"}));
 }
@@ -97,8 +112,9 @@ TEST_F(ConditionalTest, MacroExpandedInCondition) {
 }
 
 TEST_F(ConditionalTest, FunctionMacroInCondition) {
-  EXPECT_EQ(Run("#define ADD(a, b) ((a) + (b))\n#if ADD(2, 3) == 5\nok\n#endif\n"),
-            (V{"ok"}));
+  EXPECT_EQ(
+      Run("#define ADD(a, b) ((a) + (b))\n#if ADD(2, 3) == 5\nok\n#endif\n"),
+      (V{"ok"}));
 }
 
 TEST_F(ConditionalTest, IfdefAndIfndef) {
@@ -108,8 +124,9 @@ TEST_F(ConditionalTest, IfdefAndIfndef) {
 }
 
 TEST_F(ConditionalTest, ElifChainSelectsFirstTrue) {
-  EXPECT_EQ(Run("#if 0\na\n#elif 0\nb\n#elif 1\nc\n#elif 1\nd\n#else\ne\n#endif\n"),
-            (V{"c"}));
+  EXPECT_EQ(
+      Run("#if 0\na\n#elif 0\nb\n#elif 1\nc\n#elif 1\nd\n#else\ne\n#endif\n"),
+      (V{"c"}));
 }
 
 TEST_F(ConditionalTest, ElifChainFallsToElse) {

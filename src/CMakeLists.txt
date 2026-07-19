@@ -33,11 +33,13 @@ target_link_libraries(bcc_basic
 add_library(bcc_lex
   lex/cursor.cc
   lex/lexer.cc
+  lex/numeric_literal.cc
 )
 
 target_include_directories(bcc_lex
   PUBLIC
     ${PROJECT_SOURCE_DIR}/include
+    ${LLVM_INCLUDE_DIRS}
 )
 
 target_compile_features(bcc_lex PUBLIC cxx_std_20)
@@ -45,6 +47,7 @@ target_compile_features(bcc_lex PUBLIC cxx_std_20)
 target_link_libraries(bcc_lex
   PUBLIC
     bcc_basic
+    LLVM
 )
 
 add_library(bcc_pp

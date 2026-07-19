@@ -16,6 +16,12 @@
 
 namespace bcc {
 
+void Preprocessor::NoteNonGuardDirectiveAtFileScope() {
+  if (cur_lexer_->GetConditionalStackDepth() == 0) {
+    cur_lexer_->GetMIOpt().OtherTopLevelDirective();
+  }
+}
+
 namespace {
 
 std::string CleanTokenSpelling(const Token& token) {
@@ -147,6 +153,7 @@ void Preprocessor::HandleDirective(Token& /*hash_tok*/) {
   }
 
   IdentifierInfo* ii = LookUpIdentifierInfo(directive);
+
   switch (ii->GetPPKeyword()) {
     case PPKeyword::kDefine:
       HandleDefineDirective(directive);
@@ -205,9 +212,7 @@ void Preprocessor::HandleDirective(Token& /*hash_tok*/) {
     default:
       // A directive at file scope that we don't model still breaks the include
       // guard shape.
-      if (cur_lexer_->GetConditionalStackDepth() == 0) {
-        cur_lexer_->GetMIOpt().OtherTopLevelDirective();
-      }
+      NoteNonGuardDirectiveAtFileScope();
       DiscardUntilEndOfDirective();
       break;
   }
@@ -327,9 +332,7 @@ void Preprocessor::HandleUndefDirective(Token& /*undef_tok*/) {
 
   IdentifierInfo* ii = LookUpIdentifierInfo(name);
 
-  if (cur_lexer_->GetConditionalStackDepth() == 0) {
-    cur_lexer_->GetMIOpt().OtherTopLevelDirective();
-  }
+  NoteNonGuardDirectiveAtFileScope();
 
   DiscardUntilEndOfDirective();  // consume any trailing tokens + kEod
   AppendUndefMacroDirective(ii, name.GetLocation());
@@ -359,63 +362,51 @@ std::string_view Preprocessor::GetCurrentFileDir() const {
 }
 
 void Preprocessor::HandleIncludeDirective(Token& include_tok) {
-  HandleIncludeCommon(include_tok, /*is_include_next=*/false,
-                      /*is_import=*/false,
-                      /*macros_only=*/false);
+  HandleIncludeCommon(include_tok, IncludeKind::kInclude);
 }
 
 void Preprocessor::HandleIncludeNextDirective(Token& include_tok) {
-  HandleIncludeCommon(include_tok, /*is_include_next=*/true,
-                      /*is_import=*/false,
-                      /*macros_only=*/false);
+  HandleIncludeCommon(include_tok, IncludeKind::kIncludeNext);
 }
 
 void Preprocessor::HandleImportDirective(Token& import_tok) {
-  HandleIncludeCommon(import_tok, /*is_include_next=*/false, /*is_import=*/true,
-                      /*macros_only=*/false);
+  HandleIncludeCommon(import_tok, IncludeKind::kImport);
 }
 
 void Preprocessor::HandleIncludeMacrosDirective(Token& include_tok) {
-  HandleIncludeCommon(include_tok, /*is_include_next=*/false,
-                      /*is_import=*/false,
-                      /*macros_only=*/true);
+  HandleIncludeCommon(include_tok, IncludeKind::kIncludeMacros);
 }
 
-bool Preprocessor::HandleIncludeCommon(Token& include_tok, bool is_include_next,
-                                       bool is_import, bool macros_only) {
-  // A file-scope directive breaks the include-guard shape.
-  if (cur_lexer_->GetConditionalStackDepth() == 0) {
-    cur_lexer_->GetMIOpt().OtherTopLevelDirective();
-  }
-
+std::optional<Preprocessor::HeaderName> Preprocessor::ParseHeaderName() {
   Token filename_tok = cur_lexer_->LexIncludeFilename();
-
-  std::string filename;
-  bool is_angled = false;
+  HeaderName header{{}, filename_tok.GetLocation(), false};
   bool consumed_to_eod = false;
 
   if (filename_tok.GetKind() == TokenKind::kHeaderName) {
     std::string spelling = CleanTokenSpelling(filename_tok);
     std::string_view raw = spelling;
-    is_angled = raw.front() == '<';
-    filename = std::string(raw.substr(1, raw.size() - 2));
+    header.is_angled = raw.front() == '<';
+    header.filename = std::string(raw.substr(1, raw.size() - 2));
   } else if (filename_tok.GetKind() == TokenKind::kEod ||
              filename_tok.GetKind() == TokenKind::kEOF) {
     diags_.Report(filename_tok.GetLocation(), diag::err_pp_expected_filename);
-    return false;
+    return std::nullopt;
   } else {
     // Computed include: macro-expand the rest of the directive line and
     // interpret the result as a header name. Handles `#include MACRO`,
     // `#include __FILE__`, and `#include FOO(...)`.
     std::vector<Token> toks;
     toks.push_back(filename_tok);
+
     for (;;) {
       Token t = cur_lexer_->Lex();
       if (t.GetKind() == TokenKind::kEod || t.GetKind() == TokenKind::kEOF)
         break;
       toks.push_back(t);
     }
+
     consumed_to_eod = true;
+
     // Attach IdentifierInfo so ExpandArgument can macro-expand each token
     // (e.g. __FILE__, or a function-like macro invocation).
     for (Token& t : toks) {
@@ -424,127 +415,112 @@ bool Preprocessor::HandleIncludeCommon(Token& include_tok, bool is_include_next,
         LookUpIdentifierInfo(t);
       }
     }
+
     std::vector<Token> expanded = ExpandArgument(toks);
-    if (!InterpretExpandedHeader(expanded, filename, is_angled)) {
+
+    if (!InterpretExpandedHeader(expanded, header.filename, header.is_angled)) {
       diags_.Report(filename_tok.GetLocation(), diag::err_pp_expected_filename);
+      return std::nullopt;
+    }
+  }
+
+  if (!consumed_to_eod) DiscardUntilEndOfDirective();
+
+  if (header.filename.empty()) {
+    diags_.Report(filename_tok.GetLocation(), diag::err_pp_empty_filename);
+    return std::nullopt;
+  }
+
+  return header;
+}
+
+const FileEntry* Preprocessor::LookupHeader(const HeaderName& header,
+                                            IncludeKind kind) {
+  if (header_search_ == nullptr) return nullptr;
+
+  if (kind == IncludeKind::kIncludeNext) {
+    return header_search_->LookupFileNext(header.filename, header.is_angled,
+                                          GetCurrentFileDir());
+  }
+  return header_search_->LookupFile(header.filename, header.is_angled,
+                                    GetCurrentFileDir());
+}
+
+bool Preprocessor::ShouldEnterHeader(const FileEntry* file, SourceLocation loc,
+                                     IncludeKind kind) {
+  const HeaderFileInfo* info = header_search_->GetExistingFileInfo(file);
+  if (kind == IncludeKind::kImport) {
+    if (info != nullptr && info->is_imported) return false;
+  } else if (info != nullptr) {
+    if (info->is_pragma_once || (info->controlling_macro != nullptr &&
+                                 IsMacroDefined(info->controlling_macro))) {
       return false;
     }
   }
 
-  if (!consumed_to_eod) {
-    DiscardUntilEndOfDirective();
-  }
-
-  if (filename.empty()) {
-    diags_.Report(filename_tok.GetLocation(), diag::err_pp_empty_filename);
-    return false;
-  }
-
-  const FileEntry* fe = nullptr;
-  if (header_search_) {
-    if (is_include_next) {
-      fe = header_search_->LookupFileNext(filename, is_angled,
-                                          GetCurrentFileDir());
-    } else {
-      fe = header_search_->LookupFile(filename, is_angled, GetCurrentFileDir());
-    }
-  }
-
-  if (callbacks_) {
-    CharacteristicKind file_type =
-        (header_search_ && fe) ? header_search_->GetFileCharacteristic(fe)
-                               : CharacteristicKind::kUser;
-    callbacks_->InclusionDirective(include_tok.GetLocation(), filename,
-                                   is_angled, fe, file_type);
-  }
-
-  if (fe == nullptr) {
-    diags_.Report(filename_tok.GetLocation(),
-                  is_include_next ? diag::err_pp_include_next_not_found
-                  : is_import     ? diag::err_pp_import_failed
-                                  : diag::err_pp_file_not_found)
-        << filename;
-    return false;
-  }
-
-  // For #import, check if this file was already imported.
-  if (is_import) {
-    if (const HeaderFileInfo* info = header_search_->GetExistingFileInfo(fe)) {
-      if (info->is_imported) {
-        return false;
-      }
-    }
-  }
-
-  // Multiple-include optimization.
-  if (!is_import) {
-    if (const HeaderFileInfo* info = header_search_->GetExistingFileInfo(fe)) {
-      if (info->is_pragma_once || (info->controlling_macro != nullptr &&
-                                   IsMacroDefined(info->controlling_macro))) {
-        return false;
-      }
-    }
-  }
-
   if (GetIncludeStackDepth() >= kMaxIncludeDepth) {
-    diags_.Report(filename_tok.GetLocation(), diag::err_pp_include_too_deep);
+    diags_.Report(loc, diag::err_pp_include_too_deep);
     return false;
   }
-
-  FileID fid = sm_.CreateFileID(*fe, filename_tok.GetLocation());
-  if (!fid.IsValid()) {
-    diags_.Report(filename_tok.GetLocation(),
-                  is_include_next ? diag::err_pp_include_next_not_found
-                  : is_import     ? diag::err_pp_import_failed
-                                  : diag::err_pp_file_not_found)
-        << filename;
-    return false;
-  }
-
-  // Mark the file as imported if this is #import.
-  if (is_import && header_search_) {
-    header_search_->SetFileImported(fe);
-  }
-
-  // For __include_macros, we temporarily suppress token output.
-  // This is done by processing the file normally but discarding non-macro
-  // tokens. We use a special flag to skip non-directive tokens. For now, we
-  // enter the file normally. A more sophisticated implementation would skip
-  // non-#define tokens, but for correctness the macros are still processed.
-  EnterIncludeFile(fid, filename_tok.GetLocation());
   return true;
 }
 
-bool Preprocessor::ExtractMacroHeaderName(MacroInfo* macro,
-                                          std::string& filename,
-                                          bool& is_angled) {
-  const auto& repl = macro->GetReplacementTokens();
-  if (repl.empty()) return false;
+bool Preprocessor::EnterResolvedHeader(const FileEntry* file,
+                                       SourceLocation loc, IncludeKind kind) {
+  FileID fid = sm_.CreateFileID(*file, loc);
 
-  // Case 1: Single string literal: #define MACRO "file.h"
-  if (repl.size() == 1 && repl[0].GetKind() == TokenKind::kStringLiteral) {
-    std::string spelling = CleanTokenSpelling(repl[0]);
-    std::string_view raw = spelling;
-    if (raw.size() >= 2 && raw.front() == '"' && raw.back() == '"') {
-      filename = std::string(raw.substr(1, raw.size() - 2));
-      is_angled = false;
-      return true;
-    }
+  if (!fid.IsValid()) return false;
+
+  if (kind == IncludeKind::kImport) {
+    header_search_->SetFileImported(file);
+  }
+
+  // kIncludeMacros currently enters the file normally, preserving the prior
+  // behavior until macros-only token suppression is implemented.
+  EnterIncludeFile(fid, loc);
+
+  return true;
+}
+
+bool Preprocessor::HandleIncludeCommon(Token& include_tok, IncludeKind kind) {
+  NoteNonGuardDirectiveAtFileScope();
+  std::optional<HeaderName> header = ParseHeaderName();
+
+  if (!header) return false;
+
+  const FileEntry* file = LookupHeader(*header, kind);
+  if (callbacks_) {
+    CharacteristicKind file_type =
+        file != nullptr ? header_search_->GetFileCharacteristic(file)
+                        : CharacteristicKind::kUser;
+    callbacks_->InclusionDirective(include_tok.GetLocation(), header->filename,
+                                   header->is_angled, file, file_type);
+  }
+
+  if (file == nullptr) {
+    diags_.Report(header->location, kind == IncludeKind::kIncludeNext
+                                        ? diag::err_pp_include_next_not_found
+                                    : kind == IncludeKind::kImport
+                                        ? diag::err_pp_import_failed
+                                        : diag::err_pp_file_not_found)
+        << header->filename;
+
     return false;
   }
 
-  // Case 2: Angle-bracket sequence: #define MACRO <file.h>
-  if (repl.size() >= 3 && repl[0].GetKind() == TokenKind::kLess &&
-      repl.back().GetKind() == TokenKind::kGreater) {
-    filename.clear();
-    for (std::size_t i = 1; i < repl.size() - 1; ++i) {
-      filename += CleanTokenSpelling(repl[i]);
-    }
-    is_angled = true;
-    return true;
+  if (!ShouldEnterHeader(file, header->location, kind)) return false;
+
+  if (!EnterResolvedHeader(file, header->location, kind)) {
+    diags_.Report(header->location, kind == IncludeKind::kIncludeNext
+                                        ? diag::err_pp_include_next_not_found
+                                    : kind == IncludeKind::kImport
+                                        ? diag::err_pp_import_failed
+                                        : diag::err_pp_file_not_found)
+        << header->filename;
+    return false;
   }
 
-  return false;
+  return true;
 }
 
 // Interprets a (macro-expanded) token sequence as a #include header name:
@@ -558,10 +534,12 @@ bool Preprocessor::InterpretExpandedHeader(const std::vector<Token>& toks,
 
   // Drop a trailing Eod/EOF if ExpandArgument left one.
   std::size_t n = toks.size();
+
   while (n > 0 && (toks[n - 1].GetKind() == TokenKind::kEod ||
                    toks[n - 1].GetKind() == TokenKind::kEOF)) {
     --n;
   }
+
   if (n == 0) return false;
 
   if (n == 1 && IsStringLiteralKind(toks[0].GetKind())) {
@@ -569,19 +547,25 @@ bool Preprocessor::InterpretExpandedHeader(const std::vector<Token>& toks,
     std::string_view raw = spelling;
     // Skip an encoding prefix to find the opening quote.
     std::size_t q = raw.find('"');
+
     if (q == std::string_view::npos) return false;
+
     filename = std::string(raw.substr(q + 1, raw.size() - q - 2));
     is_angled = false;
+
     return true;
   }
 
   if (n >= 2 && toks[0].GetKind() == TokenKind::kLess &&
       toks[n - 1].GetKind() == TokenKind::kGreater) {
     filename.clear();
+
     for (std::size_t i = 1; i + 1 < n; ++i) {
       filename += CleanTokenSpelling(toks[i]);
     }
+
     is_angled = true;
+
     return true;
   }
 
@@ -600,9 +584,7 @@ void Preprocessor::HandlePragmaDirective(Token& pragma_tok) {
 
   // A file-scope #pragma breaks the include-guard shape (a #pragma once file is
   // handled by the separate pragma-once mechanism below).
-  if (cur_lexer_->GetConditionalStackDepth() == 0) {
-    cur_lexer_->GetMIOpt().OtherTopLevelDirective();
-  }
+  NoteNonGuardDirectiveAtFileScope();
 
   Token tok = cur_lexer_->Lex();
 
@@ -621,26 +603,32 @@ void Preprocessor::HandlePragmaDirective(Token& pragma_tok) {
   // Editor-only / no-op pragmas that Clang consumes entirely (no -E output).
   if (tok.GetKind() == TokenKind::kIdentifier) {
     std::string_view ns = LookUpIdentifierInfo(tok)->GetName();
+
     if (ns == "mark" || ns == "region" || ns == "endregion") {
       DiscardUntilEndOfDirective();
       return;
     }
+
     if (ns == "message") {
       HandlePragmaMessageLike(pragma_tok, "message", /*is_gcc=*/false);
       return;
     }
+
     if (ns == "GCC" || ns == "clang") {
       HandleGCCOrClangPragma(pragma_tok, tok);
       return;
     }
+
     if (ns == "STDC") {
       HandleSTDCPragma(pragma_tok);
       return;
     }
+
     if (ns == "push_macro") {
       HandlePushMacroPragma();
       return;
     }
+
     if (ns == "pop_macro") {
       HandlePopMacroPragma();
       return;
@@ -673,6 +661,7 @@ void Preprocessor::HandlePragmaDirective(Token& pragma_tok) {
 
 void Preprocessor::HandleGCCOrClangPragma(Token& pragma_tok, Token& ns_tok) {
   Token sub = cur_lexer_->Lex();
+
   if (sub.GetKind() != TokenKind::kIdentifier) {
     DiscardUntilEndOfDirective();
     return;
@@ -697,6 +686,7 @@ void Preprocessor::HandleGCCOrClangPragma(Token& pragma_tok, Token& ns_tok) {
         header_search_->MarkFileAsSystemHeader(fe);
       }
     }
+
     DiscardUntilEndOfDirective();
     return;
   }
@@ -725,13 +715,16 @@ void Preprocessor::HandleGCCOrClangPragma(Token& pragma_tok, Token& ns_tok) {
     out.push_back(ns_tok);
     sub.SetFlag(TokenFlag::kLeadingSpace);
     out.push_back(sub);
+
     for (;;) {
       Token next = cur_lexer_->Lex();
+
       if (next.GetKind() == TokenKind::kEod ||
           next.GetKind() == TokenKind::kEOF)
         break;
       out.push_back(next);
     }
+
     EnterTokenStream(std::move(out));
     return;
   }
@@ -741,6 +734,7 @@ void Preprocessor::HandleGCCOrClangPragma(Token& pragma_tok, Token& ns_tok) {
     HandlePragmaMessageLike(pragma_tok, "warning", /*is_gcc=*/true);
     return;
   }
+
   if (sub_name == "error") {
     HandlePragmaMessageLike(pragma_tok, "error", /*is_gcc=*/true);
     return;
@@ -761,6 +755,7 @@ void Preprocessor::HandlePragmaMessageLike(const Token& pragma_tok,
 
   for (;;) {
     Token t = LexDirectiveToken();
+
     if (t.GetKind() == TokenKind::kEod || t.GetKind() == TokenKind::kEOF) break;
 
     if (t.GetKind() == TokenKind::kLParen) {
@@ -768,6 +763,7 @@ void Preprocessor::HandlePragmaMessageLike(const Token& pragma_tok,
       ++paren_depth;
       continue;
     }
+
     if (t.GetKind() == TokenKind::kRParen) {
       if (paren_depth > 0) --paren_depth;
       continue;
@@ -849,6 +845,7 @@ bool Preprocessor::HandlePragmaOperator(Token& tok) {
   // Must be followed by '(' ... ')'.
   Token open{SourceLocation{}, TokenKind::kUnknown, nullptr, 0u};
   LexUnexpandedToken(open);
+
   if (open.GetKind() != TokenKind::kLParen) {
     if (open.GetKind() != TokenKind::kEOF &&
         open.GetKind() != TokenKind::kEod) {
@@ -901,6 +898,7 @@ bool Preprocessor::HandlePragmaOperator(Token& tok) {
   cur_lexer_ = std::move(pragma_lexer);
 
   Token hash = cur_lexer_->Lex();
+
   if (hash.GetKind() == TokenKind::kHash && hash.IsStartOfLine()) {
     HandleDirective(hash);
   }
@@ -1158,9 +1156,7 @@ std::string DecodeStringLiteral(std::string_view lexeme) {
 }  // namespace
 
 void Preprocessor::HandleLineDirective(Token& line_tok) {
-  if (cur_lexer_->GetConditionalStackDepth() == 0) {
-    cur_lexer_->GetMIOpt().OtherTopLevelDirective();
-  }
+  NoteNonGuardDirectiveAtFileScope();
 
   // The line number (and optional filename) are macro-expanded (C17 6.10.4).
   Token num = LexDirectiveToken();
@@ -1202,17 +1198,17 @@ void Preprocessor::HandleLineDirective(Token& line_tok) {
 }
 
 void Preprocessor::HandleUserDiagnosticDirective(Token& tok, bool is_error) {
-  if (cur_lexer_->GetConditionalStackDepth() == 0) {
-    cur_lexer_->GetMIOpt().OtherTopLevelDirective();
-  }
+  NoteNonGuardDirectiveAtFileScope();
 
   // The message is the rest of the line, verbatim and unexpanded (C17 6.10.5).
   std::string message;
   bool first = true;
+
   for (Token t = cur_lexer_->Lex();
        t.GetKind() != TokenKind::kEod && t.GetKind() != TokenKind::kEOF;
        t = cur_lexer_->Lex()) {
     if (!first && t.HasLeadingSpace()) message += ' ';
+
     message += t.GetLexeme();
     first = false;
   }

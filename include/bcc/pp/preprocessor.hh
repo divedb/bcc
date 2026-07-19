@@ -2,6 +2,7 @@
 
 #include <functional>
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
 #include <string_view>
@@ -204,6 +205,10 @@ class Preprocessor {
   /// EOF token) when the outermost file is exhausted.
   bool HandleEndOfFile(const Token& eof_tok, Token& result);
 
+  /// Lazily materializes the translation-unit-wide __DATE__ and __TIME__
+  /// spellings in scratch storage.
+  void EnsureDateTimeTokens();
+
   //===--------------------------------------------------------------------===//
   // Directive handling (pp_directives.cc).
   //===--------------------------------------------------------------------===//
@@ -211,6 +216,7 @@ class Preprocessor {
   /// Handles a '#' seen at the start of a line. Reads the directive name and
   /// dispatches; consumes through the end-of-directive token.
   void HandleDirective(Token& hash_tok);
+  void NoteNonGuardDirectiveAtFileScope();
   void HandleDefineDirective(Token& define_tok);
   void HandleUndefDirective(Token& undef_tok);
 
@@ -234,21 +240,29 @@ class Preprocessor {
   /// definitions.
   void HandleIncludeMacrosDirective(Token& include_macros_tok);
 
-  /// Tries to extract a header name from an object-like macro's replacement
-  /// tokens for a computed include (#include MACRO). Returns true and sets
-  /// \p filename and \p is_angled on success.
-  bool ExtractMacroHeaderName(MacroInfo* macro, std::string& filename,
-                              bool& is_angled);
-
   /// Interprets a macro-expanded token sequence as a #include header name
   /// (a single string literal or a `<...>` group).
   bool InterpretExpandedHeader(const std::vector<Token>& toks,
                                std::string& filename, bool& is_angled);
 
+  enum class IncludeKind { kInclude, kIncludeNext, kImport, kIncludeMacros };
+
+  struct HeaderName {
+    std::string filename;
+    SourceLocation location;
+    bool is_angled = false;
+  };
+
+  std::optional<HeaderName> ParseHeaderName();
+  const FileEntry* LookupHeader(const HeaderName& header, IncludeKind kind);
+  bool ShouldEnterHeader(const FileEntry* file, SourceLocation loc,
+                         IncludeKind kind);
+  bool EnterResolvedHeader(const FileEntry* file, SourceLocation loc,
+                           IncludeKind kind);
+
   /// Common include logic shared by #include, #include_next, #import, and
   /// __include_macros. Returns true if the file was entered.
-  bool HandleIncludeCommon(Token& include_tok, bool is_include_next,
-                           bool is_import, bool macros_only);
+  bool HandleIncludeCommon(Token& include_tok, IncludeKind kind);
 
   /// Handles #pragma. Recognizes `#pragma once`, `#pragma GCC poison`,
   /// `#pragma GCC system_header`, `#pragma GCC dependency`,
@@ -475,13 +489,10 @@ class Preprocessor {
   /// Monotonic source of __COUNTER__ values.
   unsigned counter_ = 0;
 
-  /// Translation-unit-wide __DATE__ / __TIME__ spellings, including quotes,
-  /// computed once at construction so every expansion agrees.
-  std::string date_literal_;
-  std::string time_literal_;
-
-  /// The top-level (main) file name, cached for __BASE_FILE__.
-  std::string base_file_name_;
+  /// Scratch spelling locations for __DATE__ / __TIME__. Initialized together
+  /// on first use so every expansion in the translation unit agrees.
+  SourceLocation date_loc_;
+  SourceLocation time_loc_;
 
   /// IdentifierInfo pointers for builtin macros — enables O(1) dispatch in
   /// ExpandBuiltinMacro (pointer comparison) instead of string comparison.

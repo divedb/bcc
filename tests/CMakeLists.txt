@@ -25,6 +25,7 @@ add_executable(bcc_lex_test
   unittest/lex/cursor_test.cc
   unittest/lex/identifier_util_test.cc
   unittest/lex/lexer_test.cc
+  unittest/lex/numeric_literal_test.cc
 )
 
 target_link_libraries(bcc_lex_test

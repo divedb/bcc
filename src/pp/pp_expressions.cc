@@ -5,10 +5,11 @@
 #include "bcc/basic/diagnostic.hh"
 #include "bcc/basic/diagnostic_ids.hh"
 #include "bcc/common/string_util.hh"
-#include "bcc/pp/identifier_table.hh"
-#include "bcc/pp/preprocessor.hh"
+#include "bcc/lex/numeric_literal.hh"
 #include "bcc/lex/token.hh"
 #include "bcc/lex/token_kind.hh"
+#include "bcc/pp/identifier_table.hh"
+#include "bcc/pp/preprocessor.hh"
 
 namespace bcc {
 
@@ -27,65 +28,38 @@ struct PPValue {
 PPValue ParseIntegerConstant(const Token& tok, DiagnosticsEngine& diags,
                              bool& ok) {
   ok = true;
-  std::string_view s = tok.GetLexeme();
+  NumericLiteralParser literal(tok.GetLexeme());
+  if (literal.HadError()) {
+    diags.Report(tok.GetLocation(), diag::err_pp_invalid_integer_constant);
+    ok = false;
+    return {};
+  }
+  if (literal.IsFloatingLiteral()) {
+    diags.Report(tok.GetLocation(), diag::err_pp_floating_constant);
+    ok = false;
+    return {};
+  }
 
-  // Reject floating constants.
-  bool is_hex = s.size() >= 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X');
-  for (char c : s) {
-    if (c == '.') {
-      diags.Report(tok.GetLocation(), diag::err_pp_floating_constant);
+  llvm::APSInt value;
+  if (literal.GetIntegerValue(value, 64)) {
+    diags.Report(tok.GetLocation(), diag::err_pp_integer_constant_too_large);
+    ok = false;
+    return {};
+  }
+
+  bool is_unsigned = literal.IsUnsigned();
+  if (!is_unsigned && value.isNegative()) {
+    // C permits implicit uintmax_t selection for non-decimal constants. Clang
+    // also recovers from an oversized decimal constant as unsigned after
+    // diagnosing it; BCC treats diagnostics as fatal, so reject that case.
+    if (literal.GetRadix() == 10) {
+      diags.Report(tok.GetLocation(), diag::err_pp_integer_constant_too_large);
       ok = false;
       return {};
     }
+    is_unsigned = true;
   }
-
-  std::size_t i = 0;
-  int base = 10;
-  if (is_hex) {
-    base = 16;
-    i = 2;
-  } else if (s.size() >= 1 && s[0] == '0') {
-    base = 8;
-    i = 1;
-  }
-
-  uint64_t value = 0;
-  for (; i < s.size(); ++i) {
-    char c = s[i];
-    int digit;
-    if (c >= '0' && c <= '9') {
-      digit = c - '0';
-    } else if (base == 16 && ((c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))) {
-      digit = (c | 0x20) - 'a' + 10;
-    } else {
-      break;  // start of the suffix (or an exponent marker handled below)
-    }
-    if (digit >= base) {
-      diags.Report(tok.GetLocation(), diag::err_pp_expected_value);
-      ok = false;
-      return {};
-    }
-    value = value * static_cast<uint64_t>(base) + static_cast<uint64_t>(digit);
-  }
-
-  // Suffix: any mix of u/U and l/L. A decimal 'e'/hex 'p' here means a float.
-  bool is_unsigned = false;
-  for (; i < s.size(); ++i) {
-    char c = static_cast<char>(s[i] | 0x20);
-    if (c == 'u') {
-      is_unsigned = true;
-    } else if (c == 'l') {
-      // long / long long: no effect on our 64-bit evaluation.
-    } else {
-      diags.Report(tok.GetLocation(),
-                   (c == 'e' || c == 'p') ? diag::err_pp_floating_constant
-                                          : diag::err_pp_expected_value);
-      ok = false;
-      return {};
-    }
-  }
-
-  return {static_cast<int64_t>(value), is_unsigned};
+  return {static_cast<int64_t>(value.getZExtValue()), is_unsigned};
 }
 
 /// Parses a character-constant token into its integer value.
@@ -104,22 +78,44 @@ PPValue ParseCharConstant(const Token& tok) {
       ++i;
       char e = s[i++];
       switch (e) {
-        case 'n': c = '\n'; break;
-        case 't': c = '\t'; break;
-        case 'r': c = '\r'; break;
-        case '0': c = 0; break;
-        case '\\': c = '\\'; break;
-        case '\'': c = '\''; break;
-        case '"': c = '"'; break;
-        case 'a': c = '\a'; break;
-        case 'b': c = '\b'; break;
-        case 'f': c = '\f'; break;
-        case 'v': c = '\v'; break;
+        case 'n':
+          c = '\n';
+          break;
+        case 't':
+          c = '\t';
+          break;
+        case 'r':
+          c = '\r';
+          break;
+        case '0':
+          c = 0;
+          break;
+        case '\\':
+          c = '\\';
+          break;
+        case '\'':
+          c = '\'';
+          break;
+        case '"':
+          c = '"';
+          break;
+        case 'a':
+          c = '\a';
+          break;
+        case 'b':
+          c = '\b';
+          break;
+        case 'f':
+          c = '\f';
+          break;
+        case 'v':
+          c = '\v';
+          break;
         case 'x': {
           uint32_t v = 0;
           while (i < s.size() && IsHexDigit(static_cast<unsigned char>(s[i]))) {
-            v = v * 16 + static_cast<uint32_t>(HexDigitValue(
-                             static_cast<unsigned char>(s[i])));
+            v = v * 16 + static_cast<uint32_t>(
+                             HexDigitValue(static_cast<unsigned char>(s[i])));
             ++i;
           }
           c = v;
@@ -144,23 +140,34 @@ int BinaryPrecedence(TokenKind kind) {
   switch (kind) {
     case TokenKind::kStar:
     case TokenKind::kSlash:
-    case TokenKind::kPercent: return 10;
+    case TokenKind::kPercent:
+      return 10;
     case TokenKind::kPlus:
-    case TokenKind::kMinus: return 9;
+    case TokenKind::kMinus:
+      return 9;
     case TokenKind::kLessLess:
-    case TokenKind::kGreaterGreater: return 8;
+    case TokenKind::kGreaterGreater:
+      return 8;
     case TokenKind::kLess:
     case TokenKind::kGreater:
     case TokenKind::kLessEqual:
-    case TokenKind::kGreaterEqual: return 7;
+    case TokenKind::kGreaterEqual:
+      return 7;
     case TokenKind::kEqualEqual:
-    case TokenKind::kExclaimEqual: return 6;
-    case TokenKind::kAmp: return 5;
-    case TokenKind::kCaret: return 4;
-    case TokenKind::kPipe: return 3;
-    case TokenKind::kAmpAmp: return 2;
-    case TokenKind::kPipePipe: return 1;
-    default: return 0;  // not a binary operator
+    case TokenKind::kExclaimEqual:
+      return 6;
+    case TokenKind::kAmp:
+      return 5;
+    case TokenKind::kCaret:
+      return 4;
+    case TokenKind::kPipe:
+      return 3;
+    case TokenKind::kAmpAmp:
+      return 2;
+    case TokenKind::kPipePipe:
+      return 1;
+    default:
+      return 0;  // not a binary operator
   }
 }
 
@@ -311,17 +318,15 @@ class ExprParser {
           diags_.Report(peek_.GetLocation(), diag::err_pp_division_by_zero);
           return {0, result_unsigned};
         }
-        return result_unsigned
-                   ? PPValue{static_cast<int64_t>(lu / ru), true}
-                   : PPValue{lhs.value / rhs.value, false};
+        return result_unsigned ? PPValue{static_cast<int64_t>(lu / ru), true}
+                               : PPValue{lhs.value / rhs.value, false};
       case TokenKind::kPercent:
         if (rhs.value == 0) {
           diags_.Report(peek_.GetLocation(), diag::err_pp_division_by_zero);
           return {0, result_unsigned};
         }
-        return result_unsigned
-                   ? PPValue{static_cast<int64_t>(lu % ru), true}
-                   : PPValue{lhs.value % rhs.value, false};
+        return result_unsigned ? PPValue{static_cast<int64_t>(lu % ru), true}
+                               : PPValue{lhs.value % rhs.value, false};
       case TokenKind::kPlus:
         return arith(lhs.value + rhs.value, lu + ru);
       case TokenKind::kMinus:
@@ -378,41 +383,56 @@ class ExprParser {
 // Recognized __has_builtin names.
 bool IsKnownBuiltin(std::string_view name) {
   static constexpr const char* kBuiltins[] = {
-    "__builtin_add_overflow",
-    "__builtin_add_overflow_p",
-    "__builtin_alloca",
-    "__builtin_alloca_with_align",
-    "__builtin_assume_aligned",
-    "__builtin_bswap16",   "__builtin_bswap32",   "__builtin_bswap64",
-    "__builtin_choose_expr",
-    "__builtin_clz",       "__builtin_clzl",      "__builtin_clzll",
-    "__builtin_constant_p",
-    "__builtin_ctz",       "__builtin_ctzl",      "__builtin_ctzll",
-    "__builtin_expect",
-    "__builtin_expect_with_probability",
-    "__builtin_ffs",       "__builtin_ffsl",      "__builtin_ffsll",
-    "__builtin_frame_address",
-    "__builtin_memcpy",    "__builtin_memmove",   "__builtin_memset",
-    "__builtin_mul_overflow",
-    "__builtin_mul_overflow_p",
-    "__builtin_object_size",
-    "__builtin_dynamic_object_size",
-    "__builtin_parity",    "__builtin_parityl",   "__builtin_parityll",
-    "__builtin_popcount",  "__builtin_popcountl", "__builtin_popcountll",
-    "__builtin_prefetch",
-    "__builtin_return_address",
-    "__builtin_strcmp",    "__builtin_strlen",
-    "__builtin_sub_overflow",
-    "__builtin_sub_overflow_p",
-    "__builtin_trap",
-    "__builtin_types_compatible_p",
-    "__builtin_unreachable",
-    "__builtin_va_arg_pack",
-    "__builtin_va_arg_pack_len",
-    "__compiletime_error",
-    "__compiletime_warning",
-    "__has_attribute",  // clang allows the meta-check
-    "__has_builtin",    // clang allows the meta-check
+      "__builtin_add_overflow",
+      "__builtin_add_overflow_p",
+      "__builtin_alloca",
+      "__builtin_alloca_with_align",
+      "__builtin_assume_aligned",
+      "__builtin_bswap16",
+      "__builtin_bswap32",
+      "__builtin_bswap64",
+      "__builtin_choose_expr",
+      "__builtin_clz",
+      "__builtin_clzl",
+      "__builtin_clzll",
+      "__builtin_constant_p",
+      "__builtin_ctz",
+      "__builtin_ctzl",
+      "__builtin_ctzll",
+      "__builtin_expect",
+      "__builtin_expect_with_probability",
+      "__builtin_ffs",
+      "__builtin_ffsl",
+      "__builtin_ffsll",
+      "__builtin_frame_address",
+      "__builtin_memcpy",
+      "__builtin_memmove",
+      "__builtin_memset",
+      "__builtin_mul_overflow",
+      "__builtin_mul_overflow_p",
+      "__builtin_object_size",
+      "__builtin_dynamic_object_size",
+      "__builtin_parity",
+      "__builtin_parityl",
+      "__builtin_parityll",
+      "__builtin_popcount",
+      "__builtin_popcountl",
+      "__builtin_popcountll",
+      "__builtin_prefetch",
+      "__builtin_return_address",
+      "__builtin_strcmp",
+      "__builtin_strlen",
+      "__builtin_sub_overflow",
+      "__builtin_sub_overflow_p",
+      "__builtin_trap",
+      "__builtin_types_compatible_p",
+      "__builtin_unreachable",
+      "__builtin_va_arg_pack",
+      "__builtin_va_arg_pack_len",
+      "__compiletime_error",
+      "__compiletime_warning",
+      "__has_attribute",  // clang allows the meta-check
+      "__has_builtin",    // clang allows the meta-check
   };
   for (auto* b : kBuiltins) {
     if (name == b) return true;
@@ -423,35 +443,81 @@ bool IsKnownBuiltin(std::string_view name) {
 // Recognized __has_attribute names.
 bool IsKnownAttribute(std::string_view name) {
   static constexpr const char* kAttributes[] = {
-    "alias",             "aligned",         "alloc_size",
-    "always_inline",     "artificial",      "assume_aligned",
-    "cleanup",           "cold",            "__cold__",
-    "const",             "constructor",     "copy",
-    "deprecated",        "designated_init", "destructor",
-    "error",             "__error__",       "externally_visible",
-    "fallthrough",       "__fallthrough__", "flatten",
-    "force_align_arg_pointer",
-    "format",            "format_arg",      "gnu_inline",
-    "hot",               "ifunc",           "interrupt",
-    "leaf",              "malloc",          "mode",
-    "no_icf",            "no_instrument_function",
-    "no_profile_instrument_function",
-    "no_reorder",        "no_sanitize_address",
-    "no_sanitize_thread","no_sanitize_undefined",
-    "noipa",             "noinline",        "noclone",
-    "noomit_frame_pointer",
-    "noplt",             "noreturn",        "notail_calls",
-    "nonnull",           "optimize",        "packed",
-    "patchable_function_entry",
-    "pure",              "remove_args",     "retain",
-    "returns_nonnull",   "returns_twice",   "section",
-    "sentinel",          "simd",            "stack_protect",
-    "symver",            "target",          "target_clones",
-    "tiny",              "tm_regparm",      "transaction_callable",
-    "transaction_cancel","transaction_may_cancel",
-    "unused",            "used",            "vec_type_hint",
-    "visibility",        "warning",         "__warning__",
-    "weak",              "weakref",         "warn_if_not_aligned",
+      "alias",
+      "aligned",
+      "alloc_size",
+      "always_inline",
+      "artificial",
+      "assume_aligned",
+      "cleanup",
+      "cold",
+      "__cold__",
+      "const",
+      "constructor",
+      "copy",
+      "deprecated",
+      "designated_init",
+      "destructor",
+      "error",
+      "__error__",
+      "externally_visible",
+      "fallthrough",
+      "__fallthrough__",
+      "flatten",
+      "force_align_arg_pointer",
+      "format",
+      "format_arg",
+      "gnu_inline",
+      "hot",
+      "ifunc",
+      "interrupt",
+      "leaf",
+      "malloc",
+      "mode",
+      "no_icf",
+      "no_instrument_function",
+      "no_profile_instrument_function",
+      "no_reorder",
+      "no_sanitize_address",
+      "no_sanitize_thread",
+      "no_sanitize_undefined",
+      "noipa",
+      "noinline",
+      "noclone",
+      "noomit_frame_pointer",
+      "noplt",
+      "noreturn",
+      "notail_calls",
+      "nonnull",
+      "optimize",
+      "packed",
+      "patchable_function_entry",
+      "pure",
+      "remove_args",
+      "retain",
+      "returns_nonnull",
+      "returns_twice",
+      "section",
+      "sentinel",
+      "simd",
+      "stack_protect",
+      "symver",
+      "target",
+      "target_clones",
+      "tiny",
+      "tm_regparm",
+      "transaction_callable",
+      "transaction_cancel",
+      "transaction_may_cancel",
+      "unused",
+      "used",
+      "vec_type_hint",
+      "visibility",
+      "warning",
+      "__warning__",
+      "weak",
+      "weakref",
+      "warn_if_not_aligned",
   };
   for (auto* a : kAttributes) {
     if (name == a) return true;
@@ -475,12 +541,18 @@ std::string_view StripUnderscores(std::string_view name) {
 bool HasCFeature(std::string_view raw) {
   std::string_view name = StripUnderscores(raw);
   static constexpr const char* kFeatures[] = {
-    // C11 core features
-    "c_atomic", "c_static_assert", "c_generic_selections",
-    "c_alignas", "c_alignof", "c_thread_local",
-    "c_generic_selection_with_controlling_type",
-    // Other widely-queried features
-    "attribute_overloadable", "c_nullable", "c_nullability",
+      // C11 core features
+      "c_atomic",
+      "c_static_assert",
+      "c_generic_selections",
+      "c_alignas",
+      "c_alignof",
+      "c_thread_local",
+      "c_generic_selection_with_controlling_type",
+      // Other widely-queried features
+      "attribute_overloadable",
+      "c_nullable",
+      "c_nullability",
   };
   for (auto* f : kFeatures) {
     if (name == f) return true;
@@ -584,11 +656,18 @@ Token Preprocessor::EvaluateHasExpression(Token& tok) {
     IdentifierInfo* arg_ii = LookUpIdentifierInfo(arg);
     std::string_view name = arg_ii->GetName();
     switch (kw) {
-      case PPKeyword::kHasBuiltin:    found = IsKnownBuiltin(name); break;
-      case PPKeyword::kHasAttribute:  found = IsKnownAttribute(name); break;
+      case PPKeyword::kHasBuiltin:
+        found = IsKnownBuiltin(name);
+        break;
+      case PPKeyword::kHasAttribute:
+        found = IsKnownAttribute(name);
+        break;
       case PPKeyword::kHasFeature:
-      case PPKeyword::kHasExtension:  found = HasCFeature(name); break;
-      default: break;
+      case PPKeyword::kHasExtension:
+        found = HasCFeature(name);
+        break;
+      default:
+        break;
     }
   }
 
@@ -609,6 +688,7 @@ Token Preprocessor::EvaluateIsIdentifier(Token& tok) {
   // The keyword must be followed by '('.
   Token open{SourceLocation{}, TokenKind::kUnknown, nullptr, 0u};
   LexUnexpandedToken(open);
+
   if (open.GetKind() != TokenKind::kLParen) {
     return tok;
   }
@@ -617,6 +697,7 @@ Token Preprocessor::EvaluateIsIdentifier(Token& tok) {
   LexUnexpandedToken(arg);
 
   bool is_identifier = false;
+
   if (arg.GetKind() == TokenKind::kIdentifier) {
     IdentifierInfo* arg_ii = LookUpIdentifierInfo(arg);
     // GNU-extension keywords (active in gnu* modes) are not identifiers.
@@ -639,12 +720,14 @@ Token Preprocessor::EvaluateIsIdentifier(Token& tok) {
 
   Token close{SourceLocation{}, TokenKind::kUnknown, nullptr, 0u};
   LexUnexpandedToken(close);
+
   if (close.GetKind() != TokenKind::kRParen) {
     diags_.Report(close.GetLocation(), diag::err_pp_expected_rparen);
   }
 
   static const char kOne[] = "1";
   static const char kZero[] = "0";
+
   return Token{tok.GetLocation(), TokenKind::kNumericConstant,
                is_identifier ? kOne : kZero, 1u};
 }
