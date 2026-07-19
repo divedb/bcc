@@ -108,3 +108,407 @@ DIAG(note_expanded_from_macro, kNote, "",
      "expanded from macro '%0'")
 DIAG(note_in_file_included_from, kNote, "",
      "in file included from %0:%1")
+
+//===----------------------------------------------------------------------===//
+// Literal diagnostics (literal_support)
+//===----------------------------------------------------------------------===//
+DIAG(err_invalid_digit, kError, "",
+     "invalid digit '%0' in %1 constant")
+DIAG(err_invalid_suffix_constant, kError, "",
+     "invalid suffix '%0' on %1 constant")
+DIAG(err_exponent_has_no_digits, kError, "",
+     "exponent has no digits")
+DIAG(err_hex_constant_requires_exponent, kError, "",
+     "hexadecimal floating constant requires an exponent")
+DIAG(warn_integer_literal_too_large, kWarning, "implicitly-unsigned-literal",
+     "integer literal is too large to be represented in a signed integer "
+     "type, interpreting as unsigned")
+DIAG(err_integer_literal_too_large, kError, "",
+     "integer literal is too large to be represented in any integer type")
+DIAG(err_empty_character, kError, "",
+     "empty character constant")
+DIAG(warn_multichar_character_constant, kWarning, "multichar",
+     "multi-character character constant")
+DIAG(err_escape_too_large, kError, "",
+     "%0 escape sequence out of range")
+DIAG(err_unknown_escape, kError, "",
+     "unknown escape sequence '\\%0'")
+DIAG(err_unsupported_string_concat, kError, "",
+     "unsupported non-standard concatenation of string literals")
+
+//===----------------------------------------------------------------------===//
+// Parser diagnostics
+//===----------------------------------------------------------------------===//
+DIAG(err_expected, kError, "",
+     "expected %0")
+DIAG(err_expected_after, kError, "",
+     "expected %1 after %0")
+DIAG(err_expected_expression, kError, "",
+     "expected expression")
+DIAG(err_expected_type_name, kError, "",
+     "expected a type")
+DIAG(err_expected_ident, kError, "",
+     "expected identifier")
+DIAG(err_expected_ident_lparen, kError, "",
+     "expected identifier or '('")
+DIAG(err_expected_semi_declaration, kError, "",
+     "expected ';' at end of declaration")
+DIAG(err_expected_semi_after_expr, kError, "",
+     "expected ';' after expression")
+DIAG(err_expected_semi_after_stmt, kError, "",
+     "expected ';' after %0 statement")
+DIAG(err_expected_statement, kError, "",
+     "expected statement")
+DIAG(err_expected_lbrace_or_comma, kError, "",
+     "expected '{' or ','")
+DIAG(err_expected_fn_body, kError, "",
+     "expected function body after function declarator")
+DIAG(err_expected_rbrace, kError, "",
+     "expected '}'")
+DIAG(note_to_match_this_lbrace, kNote, "",
+     "to match this '{'")
+DIAG(err_expected_rsquare, kError, "",
+     "expected ']'")
+DIAG(note_to_match_this_lsquare, kNote, "",
+     "to match this '['")
+DIAG(err_invalid_decl_spec_combination, kError, "",
+     "cannot combine with previous '%0' declaration specifier")
+DIAG(err_duplicate_declspec, kError, "duplicate-decl-specifier",
+     "duplicate '%0' declaration specifier")
+DIAG(warn_missing_type_specifier, kWarning, "implicit-int",
+     "type specifier missing, defaults to 'int'")
+DIAG(err_declaration_does_not_declare_anything, kWarning,
+     "missing-declarations",
+     "declaration does not declare anything")
+DIAG(err_typename_requires_specqual, kError, "",
+     "type name requires a specifier or qualifier")
+DIAG(err_invalid_storage_class_in_func_decl, kError, "",
+     "invalid storage class specifier in function declarator")
+DIAG(err_typename_invalid_storageclass, kError, "",
+     "type name does not allow storage class to be specified")
+DIAG(err_unexpected_typedef_ident, kError, "",
+     "unexpected type name '%0': expected identifier")
+DIAG(err_illegal_decl_no_name, kError, "",
+     "declaration of anonymous %0 must be a definition")
+DIAG(err_unknown_typename, kError, "",
+     "unknown type name '%0'")
+DIAG(err_use_of_tag_name_without_tag, kError, "",
+     "must use '%0' tag to refer to type '%1'")
+DIAG(err_expected_case_colon, kError, "",
+     "expected ':' after '%0'")
+DIAG(err_generic_expected_comma_or_rparen, kError, "",
+     "expected ',' or ')' in '_Generic' selection")
+DIAG(err_argument_required_after_attribute, kError, "",
+     "argument required after attribute")
+DIAG(err_knr_definition_unsupported, kError, "",
+     "K&R-style function definitions are not supported")
+DIAG(err_parameter_requires_type, kError, "",
+     "parameter requires a type specifier")
+DIAG(err_expected_parameter_declarator, kError, "",
+     "expected parameter declarator")
+DIAG(err_designator_expected_field_name, kError, "",
+     "expected a field designator, such as '.field = 4'")
+DIAG(err_expected_equal_designator, kError, "",
+     "expected '=' or another designator")
+DIAG(err_static_assert_expected_string, kError, "",
+     "expected string literal for diagnostic message in static_assert")
+
+//===----------------------------------------------------------------------===//
+// Sema: declaration diagnostics
+//===----------------------------------------------------------------------===//
+DIAG(err_undeclared_var_use, kError, "",
+     "use of undeclared identifier '%0'")
+DIAG(err_implicit_function_decl, kError, "implicit-function-declaration",
+     "call to undeclared function '%0'; ISO C99 and later do not support "
+     "implicit function declarations")
+DIAG(err_redefinition, kError, "",
+     "redefinition of '%0'")
+DIAG(err_redefinition_different_kind, kError, "",
+     "redefinition of '%0' as different kind of symbol")
+DIAG(err_redefinition_different_type, kError, "",
+     "redefinition of '%0' with a different type: '%1' vs '%2'")
+DIAG(err_conflicting_types, kError, "",
+     "conflicting types for '%0'")
+DIAG(note_previous_definition, kNote, "",
+     "previous definition is here")
+DIAG(note_previous_declaration, kNote, "",
+     "previous declaration is here")
+DIAG(err_static_non_static, kError, "",
+     "static declaration of '%0' follows non-static declaration")
+DIAG(err_non_static_static, kError, "",
+     "non-static declaration of '%0' follows static declaration")
+DIAG(err_typedef_not_identifier, kError, "",
+     "typedef name must be an identifier")
+DIAG(err_typecheck_field_variable_size, kError, "",
+     "fields must have a constant size")
+DIAG(err_field_incomplete, kError, "",
+     "field has incomplete type '%0'")
+DIAG(err_flexible_array_not_at_end, kError, "",
+     "flexible array member must be at the end of the struct")
+DIAG(err_flexible_array_empty_struct, kError, "",
+     "flexible array member '%0' not allowed in otherwise empty struct")
+DIAG(err_field_function_type, kError, "",
+     "field '%0' declared as a function")
+DIAG(err_bitfield_not_integer, kError, "",
+     "bit-field '%0' has non-integral type '%1'")
+DIAG(err_bitfield_width_not_ice, kError, "",
+     "bit-field '%0' width not an integer constant expression")
+DIAG(err_bitfield_negative_width, kError, "",
+     "bit-field '%0' has negative width (%1)")
+DIAG(err_bitfield_width_exceeds_type_width, kError, "",
+     "width of bit-field '%0' (%1 bits) exceeds the width of its type "
+     "(%2 bits)")
+DIAG(err_bitfield_zero_width_named, kError, "",
+     "named bit-field '%0' has zero width")
+DIAG(err_duplicate_member, kError, "",
+     "duplicate member '%0'")
+DIAG(note_previous_member, kNote, "",
+     "previous declaration is here")
+DIAG(err_nested_redefinition, kError, "",
+     "nested redefinition of '%0'")
+DIAG(err_use_with_wrong_tag, kError, "",
+     "use of '%0' with tag type that does not match previous declaration")
+DIAG(err_enum_invalid_underlying, kError, "",
+     "enumerator value is not an integer constant expression")
+DIAG(err_enumerator_too_large, kError, "",
+     "enumerator value is not representable in the underlying type 'int'")
+DIAG(err_variable_incomplete_type, kError, "",
+     "variable has incomplete type '%0'")
+DIAG(err_typecheck_decl_incomplete_type, kError, "",
+     "tentative definition has type '%0' that is never completed")
+DIAG(err_func_returning_array_function, kError, "",
+     "function cannot return %0 type '%1'")
+DIAG(err_array_of_functions, kError, "",
+     "'%0' declared as array of functions")
+DIAG(err_illegal_decl_array_incomplete_type, kError, "",
+     "array has incomplete element type '%0'")
+DIAG(err_typecheck_negative_array_size, kError, "",
+     "'%0' declared as an array with a negative size")
+DIAG(warn_typecheck_zero_array_size, kWarning, "zero-length-array",
+     "zero size arrays are an extension")
+DIAG(err_array_size_non_int, kError, "",
+     "size of array has non-integer type '%0'")
+DIAG(err_vla_unsupported, kError, "",
+     "variable length arrays are not supported")
+DIAG(err_typedef_cannot_have_initializer, kError, "",
+     "illegal initializer (only variables can be initialized)")
+DIAG(err_func_cannot_have_initializer, kError, "",
+     "illegal initializer (only variables can be initialized)")
+DIAG(err_extern_has_initializer, kWarning, "extern-initializer",
+     "'extern' variable has an initializer")
+DIAG(err_block_extern_cant_init, kError, "",
+     "'extern' variable cannot have an initializer")
+DIAG(err_param_not_declared, kError, "",
+     "parameter named '%0' is missing")
+DIAG(err_parameter_name_omitted, kError, "",
+     "parameter name omitted")
+DIAG(err_typecheck_sclass_fscope, kError, "",
+     "illegal storage class on file-scoped variable")
+DIAG(err_typecheck_sclass_func, kError, "",
+     "illegal storage class on function")
+DIAG(err_static_block_func, kError, "",
+     "function declared in block scope cannot have 'static' storage class")
+DIAG(err_void_only_param, kError, "",
+     "'void' must be the first and only parameter if specified")
+DIAG(err_param_incomplete_type, kError, "",
+     "variable has incomplete type '%0'")
+DIAG(err_func_def_incomplete_result, kError, "",
+     "incomplete result type '%0' in function definition")
+DIAG(err_static_assert_failed, kError, "",
+     "static assertion failed%0")
+DIAG(err_static_assert_expression_is_not_constant, kError, "",
+     "static assertion expression is not an integral constant expression")
+DIAG(err_main_returns_nonint, kWarning, "main-return-type",
+     "return type of 'main' is not 'int'")
+DIAG(err_label_redefinition, kError, "",
+     "redefinition of label '%0'")
+DIAG(err_undeclared_label_use, kError, "",
+     "use of undeclared label '%0'")
+DIAG(warn_unused_variable, kWarning, "unused-variable",
+     "unused variable '%0'")
+
+//===----------------------------------------------------------------------===//
+// Sema: type diagnostics
+//===----------------------------------------------------------------------===//
+DIAG(err_invalid_sign_spec, kError, "",
+     "'%0' cannot be signed or unsigned")
+DIAG(err_invalid_width_spec, kError, "",
+     "'%0' cannot be short, long, or long long")
+DIAG(err_invalid_qualifier_for_function, kError, "",
+     "invalid qualifier on function type")
+DIAG(err_func_returning_qualified_void, kWarning, "ignored-qualifiers",
+     "'%0' type qualifier on return type has no effect")
+
+//===----------------------------------------------------------------------===//
+// Sema: expression diagnostics
+//===----------------------------------------------------------------------===//
+DIAG(err_typecheck_invalid_operands, kError, "",
+     "invalid operands to binary expression ('%0' and '%1')")
+DIAG(err_typecheck_unary_expr, kError, "",
+     "invalid argument type '%0' to unary expression")
+DIAG(err_typecheck_indirection_requires_pointer, kError, "",
+     "indirection requires pointer operand ('%0' invalid)")
+DIAG(err_typecheck_invalid_lvalue_addrof, kError, "",
+     "cannot take the address of an rvalue of type '%0'")
+DIAG(err_typecheck_address_of_register, kError, "",
+     "address of register variable requested")
+DIAG(err_typecheck_addrof_bitfield, kError, "",
+     "address of bit-field requested")
+DIAG(err_typecheck_expression_not_modifiable_lvalue, kError, "",
+     "expression is not assignable")
+DIAG(err_typecheck_assign_const, kError, "",
+     "cannot assign to variable '%0' with const-qualified type '%1'")
+DIAG(err_typecheck_incomplete_type_error, kError, "",
+     "incomplete type '%0' where a complete type is required")
+DIAG(err_typecheck_arithmetic_incomplete_type, kError, "",
+     "arithmetic on a pointer to an incomplete type '%0'")
+DIAG(err_typecheck_pointer_arith_function_type, kError, "",
+     "arithmetic on a pointer to the function type '%0'")
+DIAG(err_typecheck_sub_ptr_compatible, kError, "",
+     "'%0' and '%1' are not pointers to compatible types")
+DIAG(err_typecheck_comparison_of_distinct_pointers, kWarning,
+     "compare-distinct-pointer-types",
+     "comparison of distinct pointer types ('%0' and '%1')")
+DIAG(warn_typecheck_comparison_of_pointer_integer, kWarning,
+     "pointer-integer-compare",
+     "comparison between pointer and integer ('%0' and '%1')")
+DIAG(err_typecheck_subscript_value, kError, "",
+     "subscripted value is not an array or pointer")
+DIAG(err_typecheck_subscript_not_integer, kError, "",
+     "array subscript is not an integer")
+DIAG(err_typecheck_call_not_function, kError, "",
+     "called object type '%0' is not a function or function pointer")
+DIAG(err_typecheck_call_too_few_args, kError, "",
+     "too few arguments to function call, expected %0, have %1")
+DIAG(err_typecheck_call_too_many_args, kError, "",
+     "too many arguments to function call, expected %0, have %1")
+DIAG(err_typecheck_member_reference_struct_union, kError, "",
+     "member reference base type '%0' is not a structure or union")
+DIAG(err_typecheck_member_reference_arrow, kError, "",
+     "member reference type '%0' is not a pointer")
+DIAG(err_typecheck_member_reference_suggestion, kError, "",
+     "member reference type '%0' is a pointer; did you mean to use '->'?")
+DIAG(err_typecheck_incomplete_tag, kError, "",
+     "incomplete definition of type '%0'")
+DIAG(err_no_member, kError, "",
+     "no member named '%0' in '%1'")
+DIAG(err_typecheck_illegal_increment_decrement, kError, "",
+     "cannot %1 value of type '%0'")
+DIAG(err_typecheck_sizeof_function, kError, "",
+     "invalid application of 'sizeof' to a function type")
+DIAG(err_typecheck_sizeof_incomplete, kError, "",
+     "invalid application of 'sizeof' to an incomplete type '%0'")
+DIAG(err_typecheck_alignof_incomplete, kError, "",
+     "invalid application of '_Alignof' to an incomplete type '%0'")
+DIAG(err_typecheck_cast_illegal, kError, "",
+     "cast from '%0' to '%1' is not allowed")
+DIAG(err_typecheck_cond_expect_scalar, kError, "",
+     "used type '%0' where arithmetic or pointer type is required")
+DIAG(err_typecheck_cond_incompatible_operands, kError, "",
+     "incompatible operand types ('%0' and '%1')")
+DIAG(err_typecheck_convert_incompatible, kError, "",
+     "%2 '%0' %3 an expression of incompatible type '%1'")
+DIAG(warn_typecheck_convert_pointer_int, kWarning, "int-conversion",
+     "incompatible pointer to integer conversion %2 '%0' %3 an expression "
+     "of type '%1'")
+DIAG(warn_typecheck_convert_int_pointer, kWarning, "int-conversion",
+     "incompatible integer to pointer conversion %2 '%0' %3 an expression "
+     "of type '%1'")
+DIAG(warn_typecheck_convert_incompatible_pointer, kWarning,
+     "incompatible-pointer-types",
+     "incompatible pointer types %2 '%0' %3 an expression of type '%1'")
+DIAG(warn_typecheck_convert_discards_qualifiers, kWarning,
+     "incompatible-pointer-types-discards-qualifiers",
+     "%2 '%0' %3 an expression of type '%1' discards qualifiers")
+DIAG(err_typecheck_convert_to_void, kError, "",
+     "assigning to 'void' from incompatible type '%0'")
+DIAG(err_generic_no_match, kError, "",
+     "controlling expression type '%0' not compatible with any generic "
+     "association type")
+DIAG(err_generic_multiple_default, kError, "",
+     "duplicate default generic association")
+DIAG(note_generic_prev_default, kNote, "",
+     "previous default generic association is here")
+DIAG(err_generic_duplicate_match, kError, "",
+     "type '%0' in generic association compatible with previously "
+     "specified type '%1'")
+DIAG(note_generic_compat_type, kNote, "",
+     "compatible type '%0' specified here")
+
+//===----------------------------------------------------------------------===//
+// Sema: statement diagnostics
+//===----------------------------------------------------------------------===//
+DIAG(err_typecheck_statement_requires_scalar, kError, "",
+     "statement requires expression of scalar type ('%0' invalid)")
+DIAG(err_typecheck_statement_requires_integer, kError, "",
+     "statement requires expression of integer type ('%0' invalid)")
+DIAG(err_break_not_in_loop_or_switch, kError, "",
+     "'break' statement not in loop or switch statement")
+DIAG(err_continue_not_in_loop, kError, "",
+     "'continue' statement not in loop statement")
+DIAG(err_case_not_in_switch, kError, "",
+     "'%0' statement not in switch statement")
+DIAG(err_duplicate_case, kError, "",
+     "duplicate case value '%0'")
+DIAG(note_duplicate_case_prev, kNote, "",
+     "previous case defined here")
+DIAG(err_multiple_default_labels_defined, kError, "",
+     "multiple default labels in one switch")
+DIAG(note_duplicate_default_prev, kNote, "",
+     "previous default defined here")
+DIAG(err_case_label_not_ice, kError, "",
+     "expression is not an integer constant expression")
+DIAG(err_return_void_function, kError, "",
+     "void function '%0' should not return a value")
+DIAG(warn_return_missing_expr, kError, "return-mismatch",
+     "non-void function '%0' should return a value")
+
+//===----------------------------------------------------------------------===//
+// Sema: initializer / constant diagnostics
+//===----------------------------------------------------------------------===//
+DIAG(err_init_element_not_constant, kError, "",
+     "initializer element is not a compile-time constant")
+DIAG(err_array_init_not_init_list, kError, "",
+     "array initializer must be an initializer list")
+DIAG(err_array_init_string_too_long, kWarning, "excess-initializers",
+     "initializer-string for char array is too long")
+DIAG(err_excess_initializers, kWarning, "excess-initializers",
+     "excess elements in %0 initializer")
+DIAG(err_init_scalar_with_braces, kWarning, "many-braces-around-scalar-init",
+     "too many braces around scalar initializer")
+DIAG(err_init_empty_scalar, kError, "",
+     "scalar initializer cannot be empty")
+DIAG(err_designator_for_scalar_init, kError, "",
+     "designator in initializer for scalar type '%0'")
+DIAG(err_field_designator_non_aggr, kError, "",
+     "field designator cannot initialize a non-struct, non-union type '%0'")
+DIAG(err_field_designator_unknown, kError, "",
+     "field designator '%0' does not refer to any field in type '%1'")
+DIAG(err_array_designator_non_array, kError, "",
+     "array designator cannot initialize non-array type '%0'")
+DIAG(err_array_designator_not_ice, kError, "",
+     "array designator index is not an integer constant expression")
+DIAG(err_array_designator_negative, kError, "",
+     "array designator value '%0' is negative")
+DIAG(err_array_designator_too_large, kError, "",
+     "array designator index (%0) exceeds array bounds (%1)")
+DIAG(err_initializer_overrides, kWarning, "initializer-overrides",
+     "initializer overrides prior initialization of this subobject")
+
+//===----------------------------------------------------------------------===//
+// Constant-expression evaluation diagnostics
+//===----------------------------------------------------------------------===//
+DIAG(err_expr_not_ice, kError, "",
+     "expression is not an integer constant expression")
+DIAG(err_ice_divide_by_zero, kError, "division-by-zero",
+     "division by zero")
+DIAG(warn_shift_negative, kWarning, "shift-count-negative",
+     "shift count is negative")
+DIAG(warn_shift_gt_typewidth, kWarning, "shift-count-overflow",
+     "shift count >= width of type")
+
+//===----------------------------------------------------------------------===//
+// CodeGen diagnostics
+//===----------------------------------------------------------------------===//
+DIAG(err_codegen_cannot_compile, kError, "",
+     "cannot compile this %0 yet")
