@@ -34,11 +34,6 @@ add_library(bcc_lex
   lex/cursor.cc
   lex/lexer.cc
   lex/numeric_literal.cc
-<<<<<<< HEAD
-  lex/numeric_literal.cc
-=======
-  lex/literal_support.cc
->>>>>>> ir
 )
 
 target_include_directories(bcc_lex

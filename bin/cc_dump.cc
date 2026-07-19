@@ -65,8 +65,7 @@ int main(int argc, char* argv[]) {
 
   sm.SetMainFileID(sm.CreateFileID(*entry));
 
-  bcc::Preprocessor pp(sm, diag);
-  pp.SetHeaderSearch(header_search);
+  bcc::Preprocessor pp(sm, diag, header_search);
   pp.EnterMainFile();
 
   bcc::ASTContext ctx;
