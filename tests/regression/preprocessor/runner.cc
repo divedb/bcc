@@ -269,8 +269,7 @@ static BccResult PreprocessWithBcc(const fs::path& file,
   FileID fid = sm.CreateFileID(*fe);
   sm.SetMainFileID(fid);
 
-  Preprocessor pp(sm, diags);
-  pp.SetHeaderSearch(hs);
+  Preprocessor pp(sm, diags, hs);
   pp.EnterMainFile();
 
   std::string out;

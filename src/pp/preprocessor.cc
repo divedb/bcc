@@ -47,8 +47,9 @@ void InitDateTimeLiterals(std::string& date_out, std::string& time_out) {
 
 }  // namespace
 
-Preprocessor::Preprocessor(SourceManager& sm, DiagnosticsEngine& diags)
-    : sm_(sm), diags_(diags), scratch_(sm) {
+Preprocessor::Preprocessor(SourceManager& sm, DiagnosticsEngine& diags,
+                           HeaderSearch& header_search)
+    : sm_(sm), diags_(diags), header_search_(header_search), scratch_(sm) {
   RegisterBuiltinMacros();
 }
 
@@ -93,7 +94,7 @@ void Preprocessor::EnterSourceFileWithLexer(std::unique_ptr<PPLexer> lexer) {
   if (callbacks_) {
     callbacks_->FileChanged(sm_.GetLocForStartOfFile(cur_lexer_->GetFileID()),
                             PPCallbacks::FileChangeReason::kEnterFile, prev_fid,
-                            CharacteristicOf(cur_lexer_.get()));
+                            GetCurrentFileCharacteristic());
   }
 }
 
@@ -155,6 +156,7 @@ void Preprocessor::RemoveTopOfLexerStack() {
   // space before EMPTY → the `;` inherits it).
   bool restore_leading = false;
   bool restore_sol = false;
+
   if (cur_token_lexer_ && !cur_token_lexer_->IsStream()) {
     restore_leading = cur_token_lexer_->HasUnconsumedLeadingSpace();
     restore_sol = cur_token_lexer_->HasUnconsumedStartOfLine();
@@ -172,6 +174,7 @@ void Preprocessor::RemoveTopOfLexerStack() {
       cur_lexer_->SetHasLeadingSpace(true);
     }
   }
+
   if (restore_sol && cur_token_lexer_) {
     cur_token_lexer_->InheritStartOfLineForNext();
   }
@@ -183,7 +186,7 @@ Token Preprocessor::LexImpl() {
 
   // Loop until a callback yields a token; a callback returns false when it
   // only reshaped the lexer stack (e.g. popped an exhausted #include).
-  Token result{SourceLocation{}, TokenKind::kUnknown, nullptr, 0u};
+  Token result;
 
   while (!cur_lexer_callback_(*this, result));
 
@@ -191,7 +194,7 @@ Token Preprocessor::LexImpl() {
 }
 
 Token Preprocessor::Lex() {
-  Token result{SourceLocation{}, TokenKind::kUnknown, nullptr, 0u};
+  Token result;
 
   if (cached_lex_pos_ < cached_tokens_.size()) {
     // Replay a token previously produced by LookAhead or retained for a
@@ -273,9 +276,8 @@ bool Preprocessor::CLK_Lexer(Preprocessor& pp, Token& result) {
   pp.cur_lexer_->GetMIOpt().ReadToken();
 
   if (token.GetKind() == TokenKind::kIdentifier) {
-    if (pp.HandleIdentifier(token)) {
-      return false;  // Macro expansion started; re-dispatch to drain it.
-    }
+    // Macro expansion started; re-dispatch to drain it.
+    if (pp.HandleIdentifier(token)) return false;
   }
 
   result = token;
@@ -307,32 +309,32 @@ bool Preprocessor::CLK_TokenLexer(Preprocessor& pp, Token& result) {
 }
 
 bool Preprocessor::HandleEndOfFile(const Token& eof_tok, Token& result) {
+  assert(cur_lexer_ && "EOF handling requires an active file lexer");
+
   // A conditional left open when the file ends is an error.
-  if (cur_lexer_ && cur_lexer_->GetConditionalStackDepth() > 0) {
+  if (cur_lexer_->GetConditionalStackDepth() > 0) {
     diags_.Report(cur_lexer_->PeekConditionalLevel().if_loc,
                   diag::err_pp_unterminated_conditional);
   }
 
   // Record the include-guard controlling macro learned while lexing this file,
   // so a later #include of it can be skipped.
-  if (header_search_ && cur_lexer_) {
-    if (const FileEntry* fe = FileEntryOf(cur_lexer_.get())) {
-      if (const IdentifierInfo* m =
-              cur_lexer_->GetMIOpt().GetControllingMacro()) {
-        header_search_->SetFileControllingMacro(fe, m);
-      }
+  if (const FileEntry* fe = FileEntryOf(cur_lexer_.get())) {
+    if (const IdentifierInfo* m =
+            cur_lexer_->GetMIOpt().GetControllingMacro()) {
+      header_search_.SetFileControllingMacro(fe, m);
     }
   }
 
   if (!include_macro_stack_.empty()) {
     // Resume the file that #included this one; re-dispatch so its lexer runs.
-    FileID exited_fid = cur_lexer_ ? cur_lexer_->GetFileID() : FileID{};
+    FileID exited_fid = cur_lexer_->GetFileID();
     PopIncludeMacroStack();
 
-    if (callbacks_ && cur_lexer_) {
+    if (callbacks_) {
       callbacks_->FileChanged(sm_.GetLocForStartOfFile(cur_lexer_->GetFileID()),
                               PPCallbacks::FileChangeReason::kExitFile,
-                              exited_fid, CharacteristicOf(cur_lexer_.get()));
+                              exited_fid, GetCurrentFileCharacteristic());
     }
 
     return false;
@@ -361,26 +363,21 @@ IdentifierInfo* Preprocessor::LookUpIdentifierInfo(Token& tok) {
   return info;
 }
 
-CharacteristicKind Preprocessor::CharacteristicOf(
-    const PPLexer* lexer) const noexcept {
-  if (header_search_ == nullptr || lexer == nullptr) {
-    return CharacteristicKind::kUser;
-  }
-
-  return header_search_->GetFileCharacteristic(FileEntryOf(lexer));
-}
-
 const FileEntry* Preprocessor::FileEntryOf(
     const PPLexer* lexer) const noexcept {
-  if (lexer == nullptr || lexer->GetFileID() == sm_.GetMainFileID()) {
-    return nullptr;
-  }
+  assert(lexer != nullptr && "Lexer must not be null");
+
+  // HeaderSearch bookkeeping applies only to included headers. Represent the
+  // translation unit's main file as having no associated header entry.
+  if (lexer->GetFileID() == sm_.GetMainFileID()) return nullptr;
 
   return sm_.GetFileEntryForID(lexer->GetFileID());
 }
 
 CharacteristicKind Preprocessor::GetCurrentFileCharacteristic() const noexcept {
-  return CharacteristicOf(cur_lexer_.get());
+  assert(cur_lexer_ && "file characteristic requires an active file lexer");
+
+  return header_search_.GetFileCharacteristic(FileEntryOf(cur_lexer_.get()));
 }
 
 }  // namespace bcc

@@ -8,11 +8,12 @@
 #include "bcc/basic/diagnostic.hh"
 #include "bcc/basic/file_manager.hh"
 #include "bcc/basic/source_manager.hh"
+#include "bcc/lex/token.hh"
+#include "bcc/lex/token_kind.hh"
+#include "bcc/pp/header_search.hh"
 #include "bcc/pp/identifier_table.hh"
 #include "bcc/pp/pp_callbacks.hh"
 #include "bcc/pp/preprocessor.hh"
-#include "bcc/lex/token.hh"
-#include "bcc/lex/token_kind.hh"
 #include "gtest/gtest.h"
 
 namespace bcc {
@@ -45,7 +46,8 @@ class RecordingCallbacks : public PPCallbacks {
   void If(SourceLocation, bool condition) override {
     log_.push_back(condition ? "if true" : "if false");
   }
-  void Ifdef(SourceLocation, const IdentifierInfo* name, bool defined) override {
+  void Ifdef(SourceLocation, const IdentifierInfo* name,
+             bool defined) override {
     log_.push_back("ifdef " + std::string(name->GetName()) +
                    (defined ? " y" : " n"));
   }
@@ -66,6 +68,7 @@ class PPClientTest : public ::testing::Test {
  protected:
   FileManager fm_;
   SourceManager sm_{fm_};
+  HeaderSearch hs_{fm_};
   DiagnosticsEngine diags_{nullptr, &sm_};
 
   std::vector<std::string> events_;
@@ -74,7 +77,7 @@ class PPClientTest : public ::testing::Test {
   // installed, and drains the whole token stream.
   void RunWithCallbacks(std::string_view content) {
     sm_.SetMainFileID(sm_.CreateFileID("main.c", std::string(content)));
-    Preprocessor pp(sm_, diags_);
+    Preprocessor pp(sm_, diags_, hs_);
     pp.SetPPCallbacks(std::make_unique<RecordingCallbacks>(events_));
     pp.EnterMainFile();
     while (pp.Lex().GetKind() != TokenKind::kEOF) {
@@ -84,7 +87,7 @@ class PPClientTest : public ::testing::Test {
   // Builds a preprocessor and leaves it ready for manual Lex/LookAhead calls.
   std::unique_ptr<Preprocessor> Make(std::string_view content) {
     sm_.SetMainFileID(sm_.CreateFileID("main.c", std::string(content)));
-    auto pp = std::make_unique<Preprocessor>(sm_, diags_);
+    auto pp = std::make_unique<Preprocessor>(sm_, diags_, hs_);
     pp->EnterMainFile();
     return pp;
   }
@@ -102,23 +105,22 @@ TEST_F(PPClientTest, ReportsMacroDefineUndefAndExpand) {
 
 TEST_F(PPClientTest, ReportsConditionalEvents) {
   RunWithCallbacks("#if 1\na\n#endif\n#ifdef X\nb\n#endif\n");
-  EXPECT_EQ(events_,
-            (std::vector<std::string>{"enter", "if true", "endif", "ifdef X n",
-                                      "endif"}));
+  EXPECT_EQ(events_, (std::vector<std::string>{"enter", "if true", "endif",
+                                               "ifdef X n", "endif"}));
 }
 
 TEST_F(PPClientTest, ReportsIfndefAndElse) {
   RunWithCallbacks("#ifndef X\na\n#else\nb\n#endif\n");
-  EXPECT_EQ(events_, (std::vector<std::string>{"enter", "ifndef X n", "else",
-                                               "endif"}));
+  EXPECT_EQ(events_,
+            (std::vector<std::string>{"enter", "ifndef X n", "else", "endif"}));
 }
 
 TEST_F(PPClientTest, ReportsInclusionAndPragma) {
   // No HeaderSearch is configured, so the include resolves to "missing" but the
   // callback still fires; #pragma fires regardless.
   RunWithCallbacks("#include <sys.h>\n#pragma once\n");
-  EXPECT_EQ(events_, (std::vector<std::string>{"enter", "include <sys.h missing",
-                                               "pragma"}));
+  EXPECT_EQ(events_, (std::vector<std::string>{
+                         "enter", "include <sys.h missing", "pragma"}));
 }
 
 //===----------------------------------------------------------------------===//
@@ -166,14 +168,14 @@ TEST_F(PPClientTest, CommitKeepsConsumedPosition) {
 
 TEST_F(PPClientTest, NestedBacktrackReturnsToInnerThenOuter) {
   auto pp = Make("a b c d\n");
-  pp->EnableBacktrackAtThisPos();       // outer at 'a'
+  pp->EnableBacktrackAtThisPos();  // outer at 'a'
   EXPECT_EQ(pp->Lex().GetLexeme(), "a");
-  pp->EnableBacktrackAtThisPos();       // inner at 'b'
+  pp->EnableBacktrackAtThisPos();  // inner at 'b'
   EXPECT_EQ(pp->Lex().GetLexeme(), "b");
-  pp->Backtrack();                      // back to 'b'
+  pp->Backtrack();  // back to 'b'
   EXPECT_EQ(pp->Lex().GetLexeme(), "b");
   EXPECT_EQ(pp->Lex().GetLexeme(), "c");
-  pp->Backtrack();                      // back to 'a'
+  pp->Backtrack();  // back to 'a'
   EXPECT_EQ(pp->Lex().GetLexeme(), "a");
   EXPECT_EQ(pp->Lex().GetLexeme(), "b");
 }

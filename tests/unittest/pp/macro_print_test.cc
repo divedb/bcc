@@ -1,3 +1,5 @@
+#include "bcc/pp/macro_print.hh"
+
 #include <map>
 #include <memory>
 #include <string>
@@ -7,9 +9,9 @@
 #include "bcc/basic/source_manager.hh"
 #include "bcc/lex/token.hh"
 #include "bcc/lex/token_kind.hh"
+#include "bcc/pp/header_search.hh"
 #include "bcc/pp/identifier_table.hh"
 #include "bcc/pp/macro_info.hh"
-#include "bcc/pp/macro_print.hh"
 #include "bcc/pp/preprocessor.hh"
 #include "gtest/gtest.h"
 
@@ -22,12 +24,13 @@ class MacroPrintTest : public ::testing::Test {
  protected:
   FileManager fm_;
   SourceManager sm_{fm_};
+  HeaderSearch hs_{fm_};
   DiagnosticsEngine diags_{nullptr, &sm_};
 
   std::unique_ptr<Preprocessor> MakePP(std::string_view src) {
     FileID fid = sm_.CreateFileID("test.c", std::string(src));
     sm_.SetMainFileID(fid);
-    auto pp = std::make_unique<Preprocessor>(sm_, diags_);
+    auto pp = std::make_unique<Preprocessor>(sm_, diags_, hs_);
     pp->EnterMainFile();
     return pp;
   }

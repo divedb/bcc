@@ -43,7 +43,8 @@ class TokenLexer;
 /// token replay (CLK_TokenLexer) and directive handling arrive in later phases.
 class Preprocessor {
  public:
-  Preprocessor(SourceManager& sm, DiagnosticsEngine& diags);
+  Preprocessor(SourceManager& sm, DiagnosticsEngine& diags,
+               HeaderSearch& header_search);
 
   Preprocessor(const Preprocessor&) = delete;
   Preprocessor& operator=(const Preprocessor&) = delete;
@@ -53,15 +54,6 @@ class Preprocessor {
   SourceManager& GetSourceManager() const noexcept { return sm_; }
   DiagnosticsEngine& GetDiagnostics() const noexcept { return diags_; }
   IdentifierTable& GetIdentifierTable() noexcept { return identifiers_; }
-
-  /// \brief Configures header search for #include resolution.
-  ///
-  /// Must be set before any #include directive is processed. When unset, an
-  /// #include reports its filename as not found. The HeaderSearch must outlive
-  /// this Preprocessor.
-  ///
-  /// \param hs The HeaderSearch to use for #include resolution.
-  void SetHeaderSearch(HeaderSearch& hs) noexcept { header_search_ = &hs; }
 
   /// \brief Installs the observer that receives preprocessor events.
   ///
@@ -170,8 +162,9 @@ class Preprocessor {
   ///
   /// Derived from HeaderSearch's per-file record: a file found on the angled
   /// (system) search path, or promoted by `#pragma GCC system_header`, reports
-  /// kSystem. The main file and any file entered without a HeaderSearch report
-  /// kUser. Returns kUser while no file is current (e.g. mid macro expansion).
+  /// kSystem. The main file reports kUser.
+  ///
+  /// \pre A source file lexer is currently active.
   CharacteristicKind GetCurrentFileCharacteristic() const noexcept;
 
   /// \brief Whether the file currently being lexed is a system header.
@@ -253,10 +246,18 @@ class Preprocessor {
     bool is_angled = false;
   };
 
+  enum class HeaderEntryDecision {
+    kEnter,
+    kSkipAlreadyImported,
+    kSkipPragmaOnce,
+    kSkipControllingMacro,
+    kIncludeDepthExceeded,
+  };
+
   std::optional<HeaderName> ParseHeaderName();
   const FileEntry* LookupHeader(const HeaderName& header, IncludeKind kind);
-  bool ShouldEnterHeader(const FileEntry* file, SourceLocation loc,
-                         IncludeKind kind);
+  HeaderEntryDecision DecideHeaderEntry(const FileEntry* file,
+                                        IncludeKind kind) const;
   bool EnterResolvedHeader(const FileEntry* file, SourceLocation loc,
                            IncludeKind kind);
 
@@ -433,11 +434,6 @@ class Preprocessor {
   /// Discards the exhausted top token lexer and restores the lexer beneath it.
   void RemoveTopOfLexerStack();
 
-  /// \brief The system-header characteristic of the file lexed by \p lexer, or
-  ///        kUser if the file has no FileEntry (main / in-memory file) or no
-  ///        HeaderSearch is configured.
-  CharacteristicKind CharacteristicOf(const PPLexer* lexer) const noexcept;
-
   /// Returns the file backing \p lexer. The main file is intentionally
   /// excluded because header-search state applies only to included files.
   const FileEntry* FileEntryOf(const PPLexer* lexer) const noexcept;
@@ -456,7 +452,7 @@ class Preprocessor {
 
   SourceManager& sm_;
   DiagnosticsEngine& diags_;
-  HeaderSearch* header_search_ = nullptr;
+  HeaderSearch& header_search_;
   std::unique_ptr<PPCallbacks> callbacks_;
   IdentifierTable identifiers_;
   ScratchBuffer scratch_;

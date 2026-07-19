@@ -5,8 +5,9 @@
 #include "bcc/basic/diagnostic.hh"
 #include "bcc/basic/file_manager.hh"
 #include "bcc/basic/source_manager.hh"
-#include "bcc/pp/preprocessor.hh"
 #include "bcc/lex/token_kind.hh"
+#include "bcc/pp/header_search.hh"
+#include "bcc/pp/preprocessor.hh"
 #include "gtest/gtest.h"
 
 namespace bcc {
@@ -16,6 +17,7 @@ class FunctionMacroTest : public ::testing::Test {
  protected:
   FileManager fm_;
   SourceManager sm_{fm_};
+  HeaderSearch hs_{fm_};
   DiagnosticsEngine diags_{nullptr, &sm_};
 
   void Main(std::string_view content) {
@@ -34,7 +36,7 @@ class FunctionMacroTest : public ::testing::Test {
 
   std::vector<std::string> Run(std::string_view content) {
     Main(content);
-    Preprocessor pp(sm_, diags_);
+    Preprocessor pp(sm_, diags_, hs_);
     pp.EnterMainFile();
     return ExpandAll(pp);
   }
@@ -48,7 +50,7 @@ TEST_F(FunctionMacroTest, ExpandsSimpleFunctionLikeMacro) {
 
 TEST_F(FunctionMacroTest, NameWithoutParenIsNotExpanded) {
   Main("#define F(a) a\nF");
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   pp.EnterMainFile();
 
   Token t = pp.Lex();
@@ -68,8 +70,7 @@ TEST_F(FunctionMacroTest, PreExpandsArguments) {
 
 TEST_F(FunctionMacroTest, ArgumentWithNestedParensAndCommas) {
   // The comma inside (1, 2) is protected by parentheses -> single argument.
-  EXPECT_EQ(Run("#define ID(a) a\nID((1, 2))"),
-            (V{"(", "1", ",", "2", ")"}));
+  EXPECT_EQ(Run("#define ID(a) a\nID((1, 2))"), (V{"(", "1", ",", "2", ")"}));
 }
 
 TEST_F(FunctionMacroTest, EmptyArgumentExpandsToNothing) {
@@ -85,8 +86,7 @@ TEST_F(FunctionMacroTest, StringizeJoinsWithSingleSpaces) {
 }
 
 TEST_F(FunctionMacroTest, StringizeEscapesQuotesAndBackslashes) {
-  EXPECT_EQ(Run("#define STR(x) #x\nSTR(\"a\\b\")"),
-            (V{"\"\\\"a\\\\b\\\"\""}));
+  EXPECT_EQ(Run("#define STR(x) #x\nSTR(\"a\\b\")"), (V{"\"\\\"a\\\\b\\\"\""}));
 }
 
 TEST_F(FunctionMacroTest, PasteIdentifiers) {
@@ -128,7 +128,7 @@ TEST_F(FunctionMacroTest, VariadicWithNoTrailingArgs) {
 TEST_F(FunctionMacroTest, RecursiveFunctionLikeMacroTerminates) {
   // f expands to f(0); the inner f is painted (macro disabled) so it stops.
   Main("#define f(x) f(x)\nf(0)");
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   pp.EnterMainFile();
 
   EXPECT_EQ(ExpandAll(pp), (V{"f", "(", "0", ")"}));
@@ -146,7 +146,7 @@ TEST_F(FunctionMacroTest, FunctionLikeCallSpansWhitespaceBeforeParen) {
 
 TEST_F(FunctionMacroTest, StringizedTokensAreMacroExpansionLocations) {
   Main("#define STR(x) #x\nSTR(hi)");
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   pp.EnterMainFile();
 
   Token t = pp.Lex();

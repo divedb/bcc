@@ -12,10 +12,10 @@
 #include "bcc/basic/diagnostic.hh"
 #include "bcc/basic/file_manager.hh"
 #include "bcc/basic/source_manager.hh"
-#include "bcc/pp/header_search.hh"
-#include "bcc/pp/preprocessor.hh"
 #include "bcc/lex/token.hh"
 #include "bcc/lex/token_kind.hh"
+#include "bcc/pp/header_search.hh"
+#include "bcc/pp/preprocessor.hh"
 #include "gtest/gtest.h"
 
 namespace bcc {
@@ -180,9 +180,8 @@ static bool WouldMerge(const Token& prev, const Token& next) {
   // literal would re-lex as a single prefixed literal.
   if ((n == '"' || n == '\'') && !prev_spelling.empty()) {
     std::string_view pre = prev_spelling;
-    if (pre == "L" || pre == "u" || pre == "U" || pre == "u8" ||
-        pre == "R" || pre == "LR" || pre == "uR" || pre == "UR" ||
-        pre == "u8R") {
+    if (pre == "L" || pre == "u" || pre == "U" || pre == "u8" || pre == "R" ||
+        pre == "LR" || pre == "uR" || pre == "UR" || pre == "u8R") {
       return true;
     }
   }
@@ -192,8 +191,8 @@ static bool WouldMerge(const Token& prev, const Token& next) {
   // `<<` and `<<` (which stay two tokens) while inserting one between `<` and
   // `<` (which would form `<<`).
   static const std::unordered_set<std::string_view> kPunctuators = {
-      "<<=", ">>=", "...", "->", "++", "--", "<<", ">>", "<=", ">=", "==",
-      "!=", "&&", "||", "*=", "/=", "%=", "+=", "-=", "&=", "^=", "|=", "##"};
+      "<<=", ">>=", "...", "->", "++", "--", "<<", ">>", "<=", ">=", "==", "!=",
+      "&&",  "||",  "*=",  "/=", "%=", "+=", "-=", "&=", "^=", "|=", "##"};
   std::string cand;
   cand.reserve(prev_spelling.size() + 1);
   cand.append(prev_spelling);
@@ -248,8 +247,7 @@ static BccResult PreprocessWithBcc(const fs::path& file,
   FileID fid = sm.CreateFileID(*fe);
   sm.SetMainFileID(fid);
 
-  Preprocessor pp(sm, diags);
-  pp.SetHeaderSearch(hs);
+  Preprocessor pp(sm, diags, hs);
   pp.EnterMainFile();
 
   std::string out;
@@ -298,8 +296,9 @@ class LexerRegressionTest : public ::testing::TestWithParam<fs::path> {
     // of helper headers, and sibling .c files that may be #included) into the
     // temp dir so relative includes resolve identically for clang and bcc.
     fs::path src_dir = src_.parent_path();
-    fs::copy(src_dir, temp_dir_,
-             fs::copy_options::recursive | fs::copy_options::overwrite_existing);
+    fs::copy(
+        src_dir, temp_dir_,
+        fs::copy_options::recursive | fs::copy_options::overwrite_existing);
   }
 
   void TearDown() override { fs::remove_all(temp_dir_); }
@@ -322,7 +321,8 @@ TEST_P(LexerRegressionTest, OutputMatchesClang) {
   std::string clang_out = RunClang(test_file, temp_dir_);
 
   if (bcc.output != clang_out && std::getenv("BCC_LEX_DIFF")) {
-    std::cerr << "\n===== DIFF (clang <  bcc >) : " << rel_.string() << " =====\n";
+    std::cerr << "\n===== DIFF (clang <  bcc >) : " << rel_.string()
+              << " =====\n";
     std::istringstream a(clang_out), b(bcc.output);
     std::string la, lb;
     unsigned ln = 1;
@@ -330,8 +330,15 @@ TEST_P(LexerRegressionTest, OutputMatchesClang) {
       bool ea = !std::getline(a, la);
       bool eb = !std::getline(b, lb);
       if (ea && eb) break;
-      if (ea) { std::cerr << ln << " > " << lb << "\n"; continue; }
-      if (eb) { std::cerr << ln << " < " << la << "\n"; ln++; continue; }
+      if (ea) {
+        std::cerr << ln << " > " << lb << "\n";
+        continue;
+      }
+      if (eb) {
+        std::cerr << ln << " < " << la << "\n";
+        ln++;
+        continue;
+      }
       if (la != lb) {
         std::cerr << ln << " < " << la << "\n";
         std::cerr << ln << " > " << lb << "\n";
@@ -351,7 +358,8 @@ static auto DiscoverTests() {
   const char* filter = std::getenv("BCC_LEX_FILTER");
   for (auto& entry : fs::recursive_directory_iterator(root)) {
     if (entry.path().extension() == ".c") {
-      if (filter == nullptr || entry.path().string().find(filter) != std::string::npos)
+      if (filter == nullptr ||
+          entry.path().string().find(filter) != std::string::npos)
         files.push_back(entry.path());
     }
   }

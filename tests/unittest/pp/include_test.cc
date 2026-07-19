@@ -8,10 +8,10 @@
 #include "bcc/basic/diagnostic.hh"
 #include "bcc/basic/file_manager.hh"
 #include "bcc/basic/source_manager.hh"
+#include "bcc/lex/token_kind.hh"
 #include "bcc/pp/header_search.hh"
 #include "bcc/pp/pp_callbacks.hh"
 #include "bcc/pp/preprocessor.hh"
-#include "bcc/lex/token_kind.hh"
 #include "gtest/gtest.h"
 
 namespace bcc {
@@ -63,8 +63,7 @@ class IncludeTest : public ::testing::Test {
   }
 
   std::unique_ptr<Preprocessor> MakePP() {
-    auto pp = std::make_unique<Preprocessor>(*sm_, *diags_);
-    pp->SetHeaderSearch(*hs_);
+    auto pp = std::make_unique<Preprocessor>(*sm_, *diags_, *hs_);
     pp->EnterMainFile();
     return pp;
   }
@@ -111,8 +110,7 @@ TEST_F(IncludeTest, ResolvesLineSplicedHeaderName) {
   SetMainFile("main.c", "#include <foo\\\nbar.h>\nafter\n");
 
   auto pp = MakePP();
-  EXPECT_EQ(LexSpellings(*pp),
-            (std::vector<std::string>{"spliced", "after"}));
+  EXPECT_EQ(LexSpellings(*pp), (std::vector<std::string>{"spliced", "after"}));
   EXPECT_FALSE(diags_->HasErrors());
 }
 
@@ -146,8 +144,7 @@ TEST_F(IncludeTest, NestedIncludes) {
 
 TEST_F(IncludeTest, PragmaOnceSkipsSecondInclusion) {
   WriteFile("once.h", "#pragma once\nonly\n");
-  SetMainFile("main.c",
-              "#include \"once.h\"\n#include \"once.h\"\ntail\n");
+  SetMainFile("main.c", "#include \"once.h\"\n#include \"once.h\"\ntail\n");
 
   auto pp = MakePP();
   // "only" appears just once despite two #includes.
@@ -156,10 +153,8 @@ TEST_F(IncludeTest, PragmaOnceSkipsSecondInclusion) {
 }
 
 TEST_F(IncludeTest, IncludeGuardSkipsSecondInclusion) {
-  WriteFile("guard.h",
-            "#ifndef GUARD_H\n#define GUARD_H\nbody\n#endif\n");
-  SetMainFile("main.c",
-              "#include \"guard.h\"\n#include \"guard.h\"\nend\n");
+  WriteFile("guard.h", "#ifndef GUARD_H\n#define GUARD_H\nbody\n#endif\n");
+  SetMainFile("main.c", "#include \"guard.h\"\n#include \"guard.h\"\nend\n");
 
   auto pp = MakePP();
   // The controlling macro GUARD_H is defined on the first inclusion, so the
@@ -168,11 +163,28 @@ TEST_F(IncludeTest, IncludeGuardSkipsSecondInclusion) {
   EXPECT_FALSE(diags_->HasErrors());
 }
 
+TEST_F(IncludeTest, ImportHonorsPragmaOnceFromEarlierInclude) {
+  WriteFile("once.h", "#pragma once\nonly\n");
+  SetMainFile("main.c", "#include \"once.h\"\n#import \"once.h\"\ntail\n");
+
+  auto pp = MakePP();
+  EXPECT_EQ(LexSpellings(*pp), (std::vector<std::string>{"only", "tail"}));
+  EXPECT_FALSE(diags_->HasErrors());
+}
+
+TEST_F(IncludeTest, ImportHonorsActiveControllingMacro) {
+  WriteFile("guard.h", "#ifndef GUARD_H\n#define GUARD_H\nbody\n#endif\n");
+  SetMainFile("main.c", "#include \"guard.h\"\n#import \"guard.h\"\ntail\n");
+
+  auto pp = MakePP();
+  EXPECT_EQ(LexSpellings(*pp), (std::vector<std::string>{"body", "tail"}));
+  EXPECT_FALSE(diags_->HasErrors());
+}
+
 TEST_F(IncludeTest, NonGuardHeaderIsReReadEachInclusion) {
   // No include guard: the header must be re-read on every inclusion.
   WriteFile("plain.h", "tok\n");
-  SetMainFile("main.c",
-              "#include \"plain.h\"\n#include \"plain.h\"\n");
+  SetMainFile("main.c", "#include \"plain.h\"\n#include \"plain.h\"\n");
 
   auto pp = MakePP();
   EXPECT_EQ(LexSpellings(*pp), (std::vector<std::string>{"tok", "tok"}));
@@ -181,10 +193,8 @@ TEST_F(IncludeTest, NonGuardHeaderIsReReadEachInclusion) {
 TEST_F(IncludeTest, GuardWithTrailingContentIsNotOptimized) {
   // A token after the guard's #endif breaks the guard shape, so the file is
   // fully re-read on the second inclusion.
-  WriteFile("bad.h",
-            "#ifndef BAD_H\n#define BAD_H\nbody\n#endif\ntrailer\n");
-  SetMainFile("main.c",
-              "#include \"bad.h\"\n#include \"bad.h\"\n");
+  WriteFile("bad.h", "#ifndef BAD_H\n#define BAD_H\nbody\n#endif\ntrailer\n");
+  SetMainFile("main.c", "#include \"bad.h\"\n#include \"bad.h\"\n");
 
   auto pp = MakePP();
   // First inclusion: body + trailer. Second: guard skips body, trailer remains.
@@ -200,11 +210,11 @@ TEST_F(IncludeTest, MissingFilenameReportsError) {
   EXPECT_EQ(diags_->NumErrors(), 1u);
 }
 
-TEST_F(IncludeTest, WorksWithoutHeaderSearchByReportingNotFound) {
+TEST_F(IncludeTest, EmptyHeaderSearchReportsNotFound) {
   SetMainFile("main.c", "#include <foo.h>\nok\n");
 
-  // Deliberately do not call SetHeaderSearch.
-  Preprocessor pp(*sm_, *diags_);
+  // HeaderSearch is always present; no matching file exists in its paths.
+  Preprocessor pp(*sm_, *diags_, *hs_);
   pp.EnterMainFile();
   std::vector<std::string> out;
   for (;;) {

@@ -78,6 +78,7 @@ class PreprocessorTest : public ::testing::Test {
  protected:
   FileManager fm_;
   SourceManager sm_{fm_};
+  HeaderSearch hs_{fm_};
   DiagnosticsEngine diags_{nullptr, &sm_};
 
   FileID AddFile(std::string_view name, std::string_view content) {
@@ -128,7 +129,7 @@ TEST_F(PreprocessorTest, StreamsNonTriviaTokensOfSingleFile) {
   FileID fid = AddFile("main.c", "int  x;\n// comment\ny");
   sm_.SetMainFileID(fid);
 
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   pp.EnterMainFile();
 
   std::vector<Token> tokens = LexAll(pp);
@@ -146,7 +147,7 @@ TEST_F(PreprocessorTest, PromotesKeywordsAndAttachesIdentifierInfo) {
   FileID fid = AddFile("main.c", "int foo");
   sm_.SetMainFileID(fid);
 
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   pp.EnterMainFile();
 
   Token kw = pp.Lex();
@@ -167,7 +168,7 @@ TEST_F(PreprocessorTest, InternsRepeatedIdentifiersToSameInfo) {
   FileID fid = AddFile("main.c", "foo bar foo");
   sm_.SetMainFileID(fid);
 
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   pp.EnterMainFile();
 
   Token a = pp.Lex();
@@ -183,7 +184,7 @@ TEST_F(PreprocessorTest, JoinsLineSplicedIdentifierBeforeInterning) {
   FileID fid = AddFile("main.c", "in\\\nt x");
   sm_.SetMainFileID(fid);
 
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   pp.EnterMainFile();
 
   Token spliced = pp.Lex();
@@ -198,7 +199,7 @@ TEST_F(PreprocessorTest, ResumesIncluderAfterIncludedFileEnds) {
   FileID inc_fid = AddFile("inc.h", "x y");
   sm_.SetMainFileID(main_fid);
 
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   pp.EnterMainFile();
 
   Token a = pp.Lex();
@@ -230,7 +231,7 @@ TEST_F(PreprocessorTest, HandlesNestedIncludes) {
   FileID b_fid = AddFile("b.h", "b");
   sm_.SetMainFileID(main_fid);
 
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   pp.EnterMainFile();
 
   EXPECT_EQ(pp.Lex().GetLexeme(), "m");
@@ -249,7 +250,7 @@ TEST_F(PreprocessorTest, EofIsIdempotent) {
   FileID fid = AddFile("main.c", "q");
   sm_.SetMainFileID(fid);
 
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   pp.EnterMainFile();
 
   EXPECT_EQ(pp.Lex().GetLexeme(), "q");
@@ -259,7 +260,7 @@ TEST_F(PreprocessorTest, EofIsIdempotent) {
 }
 
 TEST_F(PreprocessorTest, NoMacros) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("int main() { return 42; }");
   pp.EnterMainFile();
 
@@ -296,7 +297,7 @@ TEST_F(PreprocessorTest, NoMacros) {
 }
 
 TEST_F(PreprocessorTest, MacroExpansion_EmptyReplacement) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define EMPTY\n"
                   "int x = EMPTY;");
   pp.EnterMainFile();
@@ -314,7 +315,7 @@ TEST_F(PreprocessorTest, MacroExpansion_EmptyReplacement) {
 }
 
 TEST_F(PreprocessorTest, MacroExpansion_MultipleReplacements) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define TYPE unsigned long\n"
                   "TYPE x;");
   pp.EnterMainFile();
@@ -336,7 +337,7 @@ TEST_F(PreprocessorTest, MacroExpansion_MultipleReplacements) {
 }
 
 TEST_F(PreprocessorTest, DefineDirective_ObjectLike_SimpleReplacement) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define PI 3.14\nfloat x = PI;");
   pp.EnterMainFile();
 
@@ -349,7 +350,7 @@ TEST_F(PreprocessorTest, DefineDirective_ObjectLike_SimpleReplacement) {
 }
 
 TEST_F(PreprocessorTest, DefineDirective_ObjectLike_MultipleReplacements) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define WIDTH 100\n"
                  "#define HEIGHT 200\n"
                  "int area = WIDTH * HEIGHT;");
@@ -366,7 +367,7 @@ TEST_F(PreprocessorTest, DefineDirective_ObjectLike_MultipleReplacements) {
 }
 
 TEST_F(PreprocessorTest, DefineDirective_ObjectLike_StringReplacement) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define NAME \"chibicpp\"\n"
                  "const char* name = NAME;");
   pp.EnterMainFile();
@@ -382,7 +383,7 @@ TEST_F(PreprocessorTest, DefineDirective_ObjectLike_StringReplacement) {
 }
 
 TEST_F(PreprocessorTest, DefineDirective_ObjectLike_ExpressionReplacement) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define MAX_SIZE 1024 * 1024\n"
                  "int size = MAX_SIZE;");
   pp.EnterMainFile();
@@ -398,7 +399,7 @@ TEST_F(PreprocessorTest, DefineDirective_ObjectLike_ExpressionReplacement) {
 }
 
 TEST_F(PreprocessorTest, DefineDirective_ObjectLike_Redefinition) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define VALUE 10\n"
                  "#define VALUE 20\n"
                  "int x = VALUE;");
@@ -413,7 +414,7 @@ TEST_F(PreprocessorTest, DefineDirective_ObjectLike_Redefinition) {
 }
 
 TEST_F(PreprocessorTest, DefineDirective_ObjectLike_Undef) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define TEMP 42\n"
                  "#undef TEMP\n"
                  "int x = TEMP;");
@@ -428,7 +429,7 @@ TEST_F(PreprocessorTest, DefineDirective_ObjectLike_Undef) {
 }
 
 TEST_F(PreprocessorTest, DefineDirective_ObjectLike_NestedMacros) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define A 1\n"
                  "#define B A + 2\n"
                  "#define C B * 3\n"
@@ -448,7 +449,7 @@ TEST_F(PreprocessorTest, DefineDirective_ObjectLike_NestedMacros) {
 }
 
 TEST_F(PreprocessorTest, DefineDirective_ObjectLike_SpecialCases) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define EMPTY\n"
                  "#define SPACES   hello  world  \n"
                  "EMPTY int x = SPACES;");
@@ -464,7 +465,7 @@ TEST_F(PreprocessorTest, DefineDirective_ObjectLike_SpecialCases) {
 }
 
 TEST_F(PreprocessorTest, DefineDirective_ObjectLike_InConditional) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define DEBUG 1\n"
                  "#if DEBUG\n"
                  "int debug_var = 1;\n"
@@ -489,7 +490,7 @@ TEST_F(PreprocessorTest, DefineDirective_ObjectLike_InConditional) {
 }
 
 TEST_F(PreprocessorTest, DefineDirective_ObjectLike_MacroInString) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define VERSION 2\n"
                  "const char* msg = \"VERSION is VERSION\";"
                  "int ver = VERSION;");
@@ -512,7 +513,7 @@ TEST_F(PreprocessorTest, DefineDirective_ObjectLike_MacroInString) {
 }
 
 TEST_F(PreprocessorTest, UndefDirective_BasicUsage) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define DEBUG 1\n"
                  "#undef DEBUG\n"
                  "int x = DEBUG;");
@@ -527,7 +528,7 @@ TEST_F(PreprocessorTest, UndefDirective_BasicUsage) {
 }
 
 TEST_F(PreprocessorTest, UndefDirective_UndefineNonExistentMacro) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#undef NON_EXISTENT\n"
                  "int x = 42;");
   pp.EnterMainFile();
@@ -541,7 +542,7 @@ TEST_F(PreprocessorTest, UndefDirective_UndefineNonExistentMacro) {
 }
 
 TEST_F(PreprocessorTest, UndefDirective_RedefineAfterUndef) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define VALUE 100\n"
                  "#undef VALUE\n"
                  "#define VALUE 200\n"
@@ -557,7 +558,7 @@ TEST_F(PreprocessorTest, UndefDirective_RedefineAfterUndef) {
 }
 
 TEST_F(PreprocessorTest, UndefDirective_MultipleUndefs) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define A 1\n"
                  "#define B 2\n"
                  "#undef A\n"
@@ -576,7 +577,7 @@ TEST_F(PreprocessorTest, UndefDirective_MultipleUndefs) {
 }
 
 TEST_F(PreprocessorTest, DefineDirective_FunctionLikeMacro) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define ADD(x, y) ((x) + (y))\nint result = ADD(5, 3);");
   pp.EnterMainFile();
 
@@ -597,7 +598,7 @@ TEST_F(PreprocessorTest, DefineDirective_FunctionLikeMacro) {
 }
 
 TEST_F(PreprocessorTest, DefineDirective_FunctionLikeMacro_EmptyArgs) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define GET_42() 42\n"
                  "int value = GET_42();");
   pp.EnterMainFile();
@@ -611,7 +612,7 @@ TEST_F(PreprocessorTest, DefineDirective_FunctionLikeMacro_EmptyArgs) {
 }
 
 TEST_F(PreprocessorTest, DefineDirective_FunctionLikeMacro_MultipleArgs) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define MUL(a, b, c) ((a) * (b) * (c))\n"
                  "int result = MUL(2, 3, 4);");
   pp.EnterMainFile();
@@ -637,7 +638,7 @@ TEST_F(PreprocessorTest, DefineDirective_FunctionLikeMacro_MultipleArgs) {
 }
 
 TEST_F(PreprocessorTest, DefineDirective_FunctionLikeMacro_Variadic) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define PRINTF(fmt, ...) printf(fmt, __VA_ARGS__)\n"
                  "PRINTF(\"%d %s\", 42, \"hello\");");
   pp.EnterMainFile();
@@ -656,7 +657,7 @@ TEST_F(PreprocessorTest, DefineDirective_FunctionLikeMacro_Variadic) {
 
 TEST_F(PreprocessorTest,
        DefineDirective_FunctionLikeMacro_GNUCommaVaArgs_Empty) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define LOG(fmt, ...) printf(fmt, ##__VA_ARGS__)\n"
                  "LOG(\"hello\");");
   pp.EnterMainFile();
@@ -672,7 +673,7 @@ TEST_F(PreprocessorTest,
 
 TEST_F(PreprocessorTest,
        DefineDirective_FunctionLikeMacro_GNUCommaVaArgs_NonEmpty) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define LOG(fmt, ...) printf(fmt, ##__VA_ARGS__)\n"
                  "LOG(\"%d %d\", 1, 2);");
   pp.EnterMainFile();
@@ -700,7 +701,7 @@ TEST_F(PreprocessorTest,
 // count 1 instead of 0. This bug surfaced when preprocessing kernel sources and
 // diffing against `clang -E`; the fix lives in TokenLexer::BuildExpansion.
 TEST_F(PreprocessorTest, GNUCommaVaArgs_KernelCountArgs) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile(
       "#define __COUNT_ARGS(_0, _1, _2, _3, _n, X...) _n\n"
       "#define COUNT_ARGS(X...) __COUNT_ARGS(, ##X, 3, 2, 1, 0)\n"
@@ -726,7 +727,7 @@ TEST_F(PreprocessorTest, GNUCommaVaArgs_KernelCountArgs) {
 // the empty *variadic* argument. An empty *named* parameter next to "##" still
 // follows the ISO placemarker rule and keeps the preceding comma.
 TEST_F(PreprocessorTest, GNUCommaVaArgs_OnlyEmptyVariadicElidesComma) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define M(a, ...) [a , ##__VA_ARGS__]\n"
              "M(x)\n"
              "M(x, y)\n");
@@ -746,7 +747,7 @@ TEST_F(PreprocessorTest, GNUCommaVaArgs_OnlyEmptyVariadicElidesComma) {
 }
 
 TEST_F(PreprocessorTest, DefineDirective_FunctionLikeMacro_Stringify) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define STRINGIFY(x) #x\n"
                  "const char* str = STRINGIFY(hello world);");
   pp.EnterMainFile();
@@ -762,7 +763,7 @@ TEST_F(PreprocessorTest, DefineDirective_FunctionLikeMacro_Stringify) {
 }
 
 TEST_F(PreprocessorTest, DefineDirective_FunctionLikeMacro_RecursiveExpansion) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define DEC(x) ((x) - 1)\n"
                  "#define DEC_DEC(x) DEC(DEC(x))\n"
                  "int result = DEC_DEC(10);");
@@ -789,7 +790,7 @@ TEST_F(PreprocessorTest, DefineDirective_FunctionLikeMacro_RecursiveExpansion) {
 }
 
 TEST_F(PreprocessorTest, DefineDirective_ObjectLikeMacro_SelfRecursiveStops) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define SELF SELF\n"
                  "SELF");
   pp.EnterMainFile();
@@ -799,7 +800,7 @@ TEST_F(PreprocessorTest, DefineDirective_ObjectLikeMacro_SelfRecursiveStops) {
 }
 
 TEST_F(PreprocessorTest, DefineDirective_FunctionLikeMacro_SelfRecursiveStops) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define SELF(x) SELF(x)\n"
                  "SELF(1)");
   pp.EnterMainFile();
@@ -810,7 +811,7 @@ TEST_F(PreprocessorTest, DefineDirective_FunctionLikeMacro_SelfRecursiveStops) {
 
 TEST_F(PreprocessorTest,
        DefineDirective_FunctionLikeMacro_PasteThenRescanExpandsResult) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define MAKE_NAME(x) x ## _SUFFIX\n"
                  "#define VALUE_SUFFIX 42\n"
                  "int n = MAKE_NAME(VALUE);");
@@ -822,7 +823,7 @@ TEST_F(PreprocessorTest,
 
 TEST_F(PreprocessorTest,
        DefineDirective_FunctionLikeMacro_MixedWithObjectLike) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define VALUE 5\n"
                  "#define ADD_VAL(x) ((x) + VALUE)\n"
                  "int result = ADD_VAL(10);");
@@ -843,7 +844,7 @@ TEST_F(PreprocessorTest,
 }
 
 TEST_F(PreprocessorTest, IfdefDirective_BasicUsage) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#ifdef DEBUG\n"
                  "int debug = 1;\n"
                  "#endif\n"
@@ -859,7 +860,7 @@ TEST_F(PreprocessorTest, IfdefDirective_BasicUsage) {
 }
 
 TEST_F(PreprocessorTest, IfdefDirective_DefinedCondition) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define DEBUG 1\n"
                  "#ifdef DEBUG\n"
                  "int debug = 1;\n"
@@ -881,7 +882,7 @@ TEST_F(PreprocessorTest, IfdefDirective_DefinedCondition) {
 }
 
 TEST_F(PreprocessorTest, IfndefDirective_DefinedCondition) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define RELEASE 1\n"
                  "#ifndef RELEASE\n"
                  "int debug = 1;\n"
@@ -905,7 +906,7 @@ TEST_F(PreprocessorTest, IfndefDirective_DefinedCondition) {
 }
 
 TEST_F(PreprocessorTest, IfndefDirective_BasicUsage) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#ifndef RELEASE\n"
                  "int debug = 1;\n"
                  "#endif\n"
@@ -926,7 +927,7 @@ TEST_F(PreprocessorTest, IfndefDirective_BasicUsage) {
 }
 
 TEST_F(PreprocessorTest, IfDirective_ConstantExpression) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#if 1\n"
                  "int included = 1;\n"
                  "#else\n"
@@ -949,7 +950,7 @@ TEST_F(PreprocessorTest, IfDirective_ConstantExpression) {
 }
 
 TEST_F(PreprocessorTest, IfDirective_MacroInCondition) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define LEVEL 2\n"
                  "#if LEVEL > 1\n"
                  "int high = 1;\n"
@@ -973,7 +974,7 @@ TEST_F(PreprocessorTest, IfDirective_MacroInCondition) {
 }
 
 TEST_F(PreprocessorTest, IfDirective_ArithmeticExpression) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#if 2 + 3 * 4 > 10\n"
                  "int expr_true = 1;\n"
                  "#else\n"
@@ -996,7 +997,7 @@ TEST_F(PreprocessorTest, IfDirective_ArithmeticExpression) {
 }
 
 TEST_F(PreprocessorTest, ElifDirective_BasicUsage) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define OPTION 2\n"
                  "#if OPTION == 1\n"
                  "int opt1 = 1;\n"
@@ -1024,7 +1025,7 @@ TEST_F(PreprocessorTest, ElifDirective_BasicUsage) {
 }
 
 TEST_F(PreprocessorTest, ElseDirective_BasicUsage) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#if 0\n"
                  "int excluded = 1;\n"
                  "#else\n"
@@ -1047,9 +1048,7 @@ TEST_F(PreprocessorTest, ElseDirective_BasicUsage) {
 }
 
 TEST_F(PreprocessorTest, IncludeDirective_BasicUsage) {
-  Preprocessor pp(sm_, diags_);
-  HeaderSearch hs(fm_);
-  pp.SetHeaderSearch(hs);
+  Preprocessor pp(sm_, diags_, hs_);
 
   // Create header file
   fs::path header_file = CreateTempFile("int header_value = 42;\n");
@@ -1075,7 +1074,7 @@ TEST_F(PreprocessorTest, IncludeDirective_BasicUsage) {
 }
 
 TEST_F(PreprocessorTest, IncludeDirective_SystemHeader) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#include <stdio.h>\n"
                  "int main() { return 0; }");
   pp.EnterMainFile();
@@ -1092,9 +1091,7 @@ TEST_F(PreprocessorTest, IncludeDirective_SystemHeader) {
 }
 
 TEST_F(PreprocessorTest, IncludeDirective_NestedIncludes) {
-  Preprocessor pp(sm_, diags_);
-  HeaderSearch hs(fm_);
-  pp.SetHeaderSearch(hs);
+  Preprocessor pp(sm_, diags_, hs_);
   fs::path inner_header = CreateTempFile("int inner = 1;\n");
   fs::path outer_header = CreateTempFile("#include \"" + inner_header.string() +
                                          "\"\n"
@@ -1125,7 +1122,7 @@ TEST_F(PreprocessorTest, IncludeDirective_NestedIncludes) {
 }
 
 TEST_F(PreprocessorTest, LineDirective_BasicUsage) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("int a = 1;\n"
                  "#line 100 \"test.c\"\n"
                  "int b = 2;\n"
@@ -1151,7 +1148,7 @@ TEST_F(PreprocessorTest, LineDirective_BasicUsage) {
 }
 
 TEST_F(PreprocessorTest, ErrorDirective_BasicUsage) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("int valid = 1;\n"
                  "#error This is a test error\n"
                  "int after_error = 2;");
@@ -1172,7 +1169,7 @@ TEST_F(PreprocessorTest, ErrorDirective_BasicUsage) {
 }
 
 TEST_F(PreprocessorTest, PragmaDirective_BasicUsage) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("int before = 1;\n"
                  "#pragma once\n"
                  "int after = 2;");
@@ -1194,7 +1191,7 @@ TEST_F(PreprocessorTest, PragmaDirective_BasicUsage) {
 }
 
 TEST_F(PreprocessorTest, DefinedOperator_MultipleConditions) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define DEBUG 1\n"
                  "#if defined(DEBUG) && !defined(RELEASE)\n"
                  "int debug_only = 1;\n"
@@ -1216,7 +1213,7 @@ TEST_F(PreprocessorTest, DefinedOperator_MultipleConditions) {
 }
 
 TEST_F(PreprocessorTest, NestedConditionals) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#if 1\n"
                  "  int outer = 1;\n"
                  "  #if 1\n"
@@ -1255,7 +1252,7 @@ TEST_F(PreprocessorTest, NestedConditionals) {
 }
 
 TEST_F(PreprocessorTest, ConditionalWithMacroExpansion) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define LEVEL 2\n"
                  "#define CHECK_LEVEL(x) (LEVEL == (x))\n"
                  "#if CHECK_LEVEL(2)\n"
@@ -1278,7 +1275,7 @@ TEST_F(PreprocessorTest, ConditionalWithMacroExpansion) {
 }
 
 TEST_F(PreprocessorTest, MacroExpansionInMacroArguments) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define DOUBLE(x) ((x) * 2)\n"
                  "#define APPLY(fn, x) fn(x)\n"
                  "int result = APPLY(DOUBLE, 5);");
@@ -1306,7 +1303,7 @@ TEST_F(PreprocessorTest, MacroExpansionInMacroArguments) {
 // tokens from the following source line into the expansion, producing merged
 // garbage like `class_fooDECLARE_c` and swallowing the next statement.
 TEST_F(PreprocessorTest, FunctionLikeMacroAtArgEndDoesNotOverread) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define foo(x) BODY\n"
                  "#define DEF(n, act) class_##n##_c; act\n"
                  "#define D2(n, act) DEF(n, act)\n"
@@ -1322,7 +1319,7 @@ TEST_F(PreprocessorTest, FunctionLikeMacroAtArgEndDoesNotOverread) {
 }
 
 TEST_F(PreprocessorTest, ConditionalCompilationWithFunctionLikeMacros) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define IS_POSITIVE(x) ((x) > 0)\n"
                  "#if IS_POSITIVE(5)\n"
                  "int positive = 1;\n"
@@ -1346,7 +1343,7 @@ TEST_F(PreprocessorTest, ConditionalCompilationWithFunctionLikeMacros) {
 }
 
 TEST_F(PreprocessorTest, MultiLineMacroDefinition) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define SWAP(a, b) do { \\\n"
                  "    typeof(a) temp = a; \\\n"
                  "    a = b; \\\n"
@@ -1366,7 +1363,7 @@ TEST_F(PreprocessorTest, MultiLineMacroDefinition) {
 }
 
 TEST_F(PreprocessorTest, StringificationOfArguments) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define STR(x) #x\n"
                  "#define XSTR(x) STR(x)\n"
                  "#define VALUE 42\n"
@@ -1392,7 +1389,7 @@ TEST_F(PreprocessorTest, StringificationOfArguments) {
 }
 
 TEST_F(PreprocessorTest, TokenPastingComplex) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define CONCAT(a, b) a ## b\n"
                  "#define MAKE_IDENTIFIER(prefix, num) CONCAT(prefix, num)\n"
                  "int MAKE_IDENTIFIER(var_, 1) = 1;\n"
@@ -1413,7 +1410,7 @@ TEST_F(PreprocessorTest, TokenPastingComplex) {
 }
 
 TEST_F(PreprocessorTest, BuiltinMacros) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("const char* file = __FILE__;\n"
                  "int line = __LINE__;\n"
                  "const char* date = __DATE__;\n"
@@ -1431,9 +1428,7 @@ TEST_F(PreprocessorTest, BuiltinMacros) {
 }
 
 TEST_F(PreprocessorTest, IncludeGuards) {
-  Preprocessor pp(sm_, diags_);
-  HeaderSearch hs(fm_);
-  pp.SetHeaderSearch(hs);
+  Preprocessor pp(sm_, diags_, hs_);
 
   // Create a header with include guard
   fs::path header_file = CreateTempFile(
@@ -1469,7 +1464,7 @@ TEST_F(PreprocessorTest, IncludeGuards) {
 }
 
 TEST_F(PreprocessorTest, ComplexNestedMacroExpansion) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define A(x) x+1\n"
                  "#define B(x) A(x)*2\n"
                  "#define C(x) B(x)/3\n"
@@ -1491,7 +1486,7 @@ TEST_F(PreprocessorTest, ComplexNestedMacroExpansion) {
 }
 
 TEST_F(PreprocessorTest, ComplexConditionalExpressions) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define A 1\n"
                  "#define B 2\n"
                  "#define C 3\n"
@@ -1527,7 +1522,7 @@ TEST_F(PreprocessorTest, ComplexConditionalExpressions) {
 }
 
 TEST_F(PreprocessorTest, ConditionalOperatorInMacro) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define MAX(a, b) ((a) > (b) ? (a) : (b))\n"
                  "#define MIN(a, b) ((a) < (b) ? (a) : (b))\n"
                  "int max_val = MAX(10, 20);\n"
@@ -1580,7 +1575,7 @@ TEST_F(PreprocessorTest, ConditionalOperatorInMacro) {
 }
 
 TEST_F(PreprocessorTest, PpCallbacks_RecordDirectivesInEncounterOrder) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   auto callbacks = std::make_unique<RecordingPPCallbacks>(sm_);
   auto* callbacks_raw = callbacks.get();
   pp.SetPPCallbacks(std::move(callbacks));
@@ -1603,9 +1598,7 @@ TEST_F(PreprocessorTest, PpCallbacks_RecordDirectivesInEncounterOrder) {
 }
 
 TEST_F(PreprocessorTest, PpCallbacks_RecordFileEnteredForMainAndIncludes) {
-  Preprocessor pp(sm_, diags_);
-  HeaderSearch hs(fm_);
-  pp.SetHeaderSearch(hs);
+  Preprocessor pp(sm_, diags_, hs_);
   auto callbacks = std::make_unique<RecordingPPCallbacks>(sm_);
   auto* callbacks_raw = callbacks.get();
   pp.SetPPCallbacks(std::move(callbacks));
@@ -1639,7 +1632,7 @@ TEST_F(PreprocessorTest, DependencyCollectorCollectsMainAndHeader) {
 
   auto collector = std::make_unique<DepCollector>();
   auto* collector_raw = collector.get();
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   pp.SetPPCallbacks(std::move(collector));
 
   fs::path header_path = CreateTempFile("int dep = 1;\n");
@@ -1659,7 +1652,7 @@ TEST_F(PreprocessorTest, DependencyCollectorCollectsMainAndHeader) {
 }
 
 TEST_F(PreprocessorTest, LineDirectiveUpdatesPresumedLocation) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("int a = 1;\n"
                   "#line 77 \"virt.c\"\n"
                   "int b = 2;\n");
@@ -1683,9 +1676,7 @@ TEST_F(PreprocessorTest, LineDirectiveUpdatesPresumedLocation) {
 }
 
 TEST_F(PreprocessorTest, PragmaOnceSkipsSecondIncludeOfSameHeader) {
-  Preprocessor pp(sm_, diags_);
-  HeaderSearch hs(fm_);
-  pp.SetHeaderSearch(hs);
+  Preprocessor pp(sm_, diags_, hs_);
   fs::path header = CreateTempFile("#pragma once\nint once_value = 1;\n");
   CreateFile("#include \"" + header.string() +
                                "\"\n"
@@ -1705,7 +1696,7 @@ TEST_F(PreprocessorTest, PragmaOnceSkipsSecondIncludeOfSameHeader) {
 }
 
 TEST_F(PreprocessorTest, FunctionLikeMacroWithoutLParenDoesNotExpand) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define ADD(x, y) x + y\n"
                  "int value = ADD;\n");
   pp.EnterMainFile();
@@ -1720,7 +1711,7 @@ TEST_F(PreprocessorTest, FunctionLikeMacroWithoutLParenDoesNotExpand) {
 }
 
 TEST_F(PreprocessorTest, ObjectLikeMacroCarriesOriginToExpandedTokens) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define VALUE 42\n"
                   "int x = VALUE;\n");
   pp.EnterMainFile();
@@ -1735,7 +1726,7 @@ TEST_F(PreprocessorTest, ObjectLikeMacroCarriesOriginToExpandedTokens) {
 }
 
 TEST_F(PreprocessorTest, NestedFunctionLikeMacroExpandsArgumentsRecursively) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define INC(x) ((x) + 1)\n"
                   "#define WRAP(x) INC(x)\n"
                   "int value = WRAP(INC(2));\n");
@@ -1751,7 +1742,7 @@ TEST_F(PreprocessorTest, NestedFunctionLikeMacroExpandsArgumentsRecursively) {
 }
 
 TEST_F(PreprocessorTest, ConditionalSkipsNestedFalseBlocksUntilMatchingEndif) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#if 0\n"
                  "#if 1\n"
                  "int hidden1 = 1;\n"
@@ -1768,7 +1759,7 @@ TEST_F(PreprocessorTest, ConditionalSkipsNestedFalseBlocksUntilMatchingEndif) {
 }
 
 TEST_F(PreprocessorTest, IncludeDirectiveRelativeToCurrentBufferPath) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   static std::random_device rd;
   static std::mt19937_64 gen(rd());
   static std::uniform_int_distribution<uint64_t> dis;
@@ -1792,9 +1783,7 @@ TEST_F(PreprocessorTest, IncludeDirectiveRelativeToCurrentBufferPath) {
   FileID main_fid = sm_.CreateFileID(*fe);
   ASSERT_TRUE(main_fid.IsValid());
   sm_.SetMainFileID(main_fid);
-  HeaderSearch hs(fm_);
-  hs.AddQuotedSearchPath(dir.string());
-  pp.SetHeaderSearch(hs);
+  hs_.AddQuotedSearchPath(dir.string());
   pp.EnterMainFile();
 
   auto spellings = CollectSpellings(pp);
@@ -1805,7 +1794,7 @@ TEST_F(PreprocessorTest, IncludeDirectiveRelativeToCurrentBufferPath) {
 
 TEST_F(PreprocessorTest,
        DirectiveTokenLocationsRemainAtStartOfLineAfterSpaces) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("   #define VALUE 1\n"
                  "VALUE\n");
   pp.EnterMainFile();
@@ -1817,7 +1806,7 @@ TEST_F(PreprocessorTest,
 }
 
 TEST_F(PreprocessorTest, DefinedOperatorDoesNotExpandOperand) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define ALIAS TARGET\n"
                  "#if defined(ALIAS)\n"
                  "int preserved = 1;\n"
@@ -1832,7 +1821,7 @@ TEST_F(PreprocessorTest, DefinedOperatorDoesNotExpandOperand) {
 }
 
 TEST_F(PreprocessorTest, UndefinedIdentifiersBecomeZeroInIfExpressions) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#if UNKNOWN_SYMBOL + 1 == 1\n"
                  "int active = 1;\n"
                  "#else\n"
@@ -1846,7 +1835,7 @@ TEST_F(PreprocessorTest, UndefinedIdentifiersBecomeZeroInIfExpressions) {
 }
 
 TEST_F(PreprocessorTest, UndefinedFunctionLikeIdentifiersBecomeZeroInIf) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#if UNKNOWN_BUILTIN(feature_name)\n"
                  "int active = 1;\n"
                  "#else\n"
@@ -1860,7 +1849,7 @@ TEST_F(PreprocessorTest, UndefinedFunctionLikeIdentifiersBecomeZeroInIf) {
 }
 
 TEST_F(PreprocessorTest, TokenPasteResultCanInvokeFunctionLikeMacro) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define CAT(a, b) a ## b\n"
                  "#define FN(x) ((x) + 1)\n"
                  "int result = CAT(F, N)(2);\n");
@@ -1873,7 +1862,7 @@ TEST_F(PreprocessorTest, TokenPasteResultCanInvokeFunctionLikeMacro) {
 }
 
 TEST_F(PreprocessorTest, PragmaOnceSkipsHeaderAcrossNestedIncludeGraph) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   static std::random_device rd;
   static std::mt19937_64 gen(rd());
   static std::uniform_int_distribution<uint64_t> dis;
@@ -1902,9 +1891,7 @@ TEST_F(PreprocessorTest, PragmaOnceSkipsHeaderAcrossNestedIncludeGraph) {
   FileID main_fid = sm_.CreateFileID(*fe);
   ASSERT_TRUE(main_fid.IsValid());
   sm_.SetMainFileID(main_fid);
-  HeaderSearch hs(fm_);
-  hs.AddQuotedSearchPath(dir.string());
-  pp.SetHeaderSearch(hs);
+  hs_.AddQuotedSearchPath(dir.string());
   pp.EnterMainFile();
 
   auto spellings = CollectSpellings(pp);
@@ -1922,7 +1909,7 @@ TEST_F(PreprocessorTest, PragmaOnceSkipsHeaderAcrossNestedIncludeGraph) {
 TEST_F(PreprocessorTest, PreprocessorDestructorAfterEOF) {
   // Create preprocessor in a scope so it gets destroyed
   {
-    Preprocessor pp(sm_, diags_);
+    Preprocessor pp(sm_, diags_, hs_);
     CreateFile("int x = 1;\nint y = 2;\n");
   pp.EnterMainFile();
 
@@ -1938,7 +1925,7 @@ TEST_F(PreprocessorTest, PreprocessorDestructorAfterEOF) {
 
 // Test multiple lex calls after EOF
 TEST_F(PreprocessorTest, MultipleLexCallsAfterEOF) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("int x = 1;");
   pp.EnterMainFile();
 
@@ -1958,7 +1945,7 @@ TEST_F(PreprocessorTest, MultipleLexCallsAfterEOF) {
 
 // Test preprocessor with file containing only a hash (edge case)
 TEST_F(PreprocessorTest, FileWithOnlyHash) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#");
   pp.EnterMainFile();
 
@@ -1975,7 +1962,7 @@ TEST_F(PreprocessorTest, FileWithOnlyHash) {
 
 // Test empty file
 TEST_F(PreprocessorTest, EmptyFile) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("");
   pp.EnterMainFile();
 
@@ -1985,7 +1972,7 @@ TEST_F(PreprocessorTest, EmptyFile) {
 
 // Test file with only whitespace
 TEST_F(PreprocessorTest, FileWithOnlyWhitespace) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("   \t\n\n  \t  \n");
   pp.EnterMainFile();
 
@@ -1995,7 +1982,7 @@ TEST_F(PreprocessorTest, FileWithOnlyWhitespace) {
 
 // Test file with only comments
 TEST_F(PreprocessorTest, FileWithOnlyComments) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("// comment\n/* block */\n");
   pp.EnterMainFile();
 
@@ -2005,7 +1992,7 @@ TEST_F(PreprocessorTest, FileWithOnlyComments) {
 
 // Test multiple empty macros in sequence
 TEST_F(PreprocessorTest, MultipleEmptyMacrosInSequence) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define EMPTY1\n"
                  "#define EMPTY2\n"
                  "#define EMPTY3\n"
@@ -2022,7 +2009,7 @@ TEST_F(PreprocessorTest, MultipleEmptyMacrosInSequence) {
 
 // Test empty macro at end of file
 TEST_F(PreprocessorTest, EmptyMacroAtEndOfFile) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define EMPTY\n"
                  "int x = 1; EMPTY");
   pp.EnterMainFile();
@@ -2037,7 +2024,7 @@ TEST_F(PreprocessorTest, EmptyMacroAtEndOfFile) {
 
 // Test function-like macro with no arguments at end of file
 TEST_F(PreprocessorTest, FunctionLikeMacroNoArgsAtEndOfFile) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define FUNC(x) x\n"
                  "FUNC");
   pp.EnterMainFile();
@@ -2049,7 +2036,7 @@ TEST_F(PreprocessorTest, FunctionLikeMacroNoArgsAtEndOfFile) {
 
 // Test deeply nested macro expansion
 TEST_F(PreprocessorTest, DeeplyNestedMacroExpansion) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define A1(x) A2(x)\n"
                  "#define A2(x) A3(x)\n"
                  "#define A3(x) A4(x)\n"
@@ -2079,7 +2066,7 @@ TEST_F(PreprocessorTest, DeeplyNestedMacroExpansion) {
 
 // Test macro argument with balanced parens
 TEST_F(PreprocessorTest, MacroArgumentWithBalancedParens) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define INVOKE(x) x\n"
                   "int result = INVOKE((1 + 2) * (3 + 4));\n");
   pp.EnterMainFile();
@@ -2106,7 +2093,7 @@ TEST_F(PreprocessorTest, MacroArgumentWithBalancedParens) {
 
 // Test macro with empty argument
 TEST_F(PreprocessorTest, MacroWithEmptyArgument) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define FOO(x, y) x y\n"
                  "int result = FOO(1, );");
   pp.EnterMainFile();
@@ -2122,7 +2109,7 @@ TEST_F(PreprocessorTest, MacroWithEmptyArgument) {
 
 // Test token paste at beginning of replacement
 TEST_F(PreprocessorTest, TokenPasteAtBeginning) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define PASTE(x) ## x\n"
                  "int result = PASTE(1);");
   pp.EnterMainFile();
@@ -2134,7 +2121,7 @@ TEST_F(PreprocessorTest, TokenPasteAtBeginning) {
 
 // Test token paste at end of replacement
 TEST_F(PreprocessorTest, TokenPasteAtEnd) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define PASTE(x) x ##\n"
                  "int result = PASTE(1);");
   pp.EnterMainFile();
@@ -2146,7 +2133,7 @@ TEST_F(PreprocessorTest, TokenPasteAtEnd) {
 
 // Test hash at end of replacement (no parameter)
 TEST_F(PreprocessorTest, HashAtEndOfReplacement) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define STR(x) x #\n"
                  "int result = STR(hello);");
   pp.EnterMainFile();
@@ -2158,7 +2145,7 @@ TEST_F(PreprocessorTest, HashAtEndOfReplacement) {
 
 // Test multiple consecutive token pastes
 TEST_F(PreprocessorTest, MultipleConsecutiveTokenPastes) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define CAT3(a, b, c) a ## b ## c\n"
                  "int CAT3(va, r_, 1) = 1;");
   pp.EnterMainFile();
@@ -2173,7 +2160,7 @@ TEST_F(PreprocessorTest, MultipleConsecutiveTokenPastes) {
 
 // Test stringification of empty argument
 TEST_F(PreprocessorTest, StringifyEmptyArgument) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define STR(x) #x\n"
                  "const char* s = STR();");
   pp.EnterMainFile();
@@ -2191,7 +2178,7 @@ TEST_F(PreprocessorTest, StringifyEmptyArgument) {
 
 // Test nested stringification
 TEST_F(PreprocessorTest, NestedStringification) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define STR(x) #x\n"
                  "#define WRAP(x) STR(x)\n"
                  "#define VALUE hello\n"
@@ -2218,7 +2205,7 @@ TEST_F(PreprocessorTest, NestedStringification) {
 
 // Test #if with complex expression
 TEST_F(PreprocessorTest, IfWithComplexExpression) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#if (1 && 0) || (1 && 1)\n"
                  "int active = 1;\n"
                  "#else\n"
@@ -2236,7 +2223,7 @@ TEST_F(PreprocessorTest, IfWithComplexExpression) {
 
 // Test #if with defined operator and parens
 TEST_F(PreprocessorTest, DefinedOperatorWithParens) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define FOO 1\n"
                  "#if defined(FOO)\n"
                  "int has_foo = 1;\n"
@@ -2250,7 +2237,7 @@ TEST_F(PreprocessorTest, DefinedOperatorWithParens) {
 
 // Test #if with defined operator without parens
 TEST_F(PreprocessorTest, DefinedOperatorWithoutParens) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define BAR 1\n"
                  "#if defined BAR\n"
                  "int has_bar = 1;\n"
@@ -2264,7 +2251,7 @@ TEST_F(PreprocessorTest, DefinedOperatorWithoutParens) {
 
 // Test unterminated #if (should handle gracefully)
 TEST_F(PreprocessorTest, UnterminatedIf) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#if 1\n"
                  "int x = 1;\n");
   pp.EnterMainFile();
@@ -2279,7 +2266,7 @@ TEST_F(PreprocessorTest, UnterminatedIf) {
 
 // Test unterminated function-like macro invocation
 TEST_F(PreprocessorTest, UnterminatedMacroInvocation) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define FUNC(x) x\n"
                  "int result = FUNC(1 + 2\n");
   pp.EnterMainFile();
@@ -2291,7 +2278,7 @@ TEST_F(PreprocessorTest, UnterminatedMacroInvocation) {
 
 // Test macro redefinition with same value (should work)
 TEST_F(PreprocessorTest, MacroRedefinitionSameValue) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define VALUE 42\n"
                  "#define VALUE 42\n"
                  "int x = VALUE;");
@@ -2307,7 +2294,7 @@ TEST_F(PreprocessorTest, MacroRedefinitionSameValue) {
 
 // Test #undef on non-existent macro
 TEST_F(PreprocessorTest, UndefNonExistentThenDefine) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#undef DOES_NOT_EXIST\n"
                  "#define DOES_NOT_EXIST 42\n"
                  "int x = DOES_NOT_EXIST;");
@@ -2323,7 +2310,7 @@ TEST_F(PreprocessorTest, UndefNonExistentThenDefine) {
 
 // Test #elif after #if 0
 TEST_F(PreprocessorTest, ElifChainWithFirstTrue) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#if 1\n"
                  "int first = 1;\n"
                  "#elif 1\n"
@@ -2343,7 +2330,7 @@ TEST_F(PreprocessorTest, ElifChainWithFirstTrue) {
 
 // Test #elif chain all false
 TEST_F(PreprocessorTest, ElifChainAllFalse) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#if 0\n"
                  "int first = 1;\n"
                  "#elif 0\n"
@@ -2361,7 +2348,7 @@ TEST_F(PreprocessorTest, ElifChainAllFalse) {
 
 // Test #elif with else
 TEST_F(PreprocessorTest, ElifWithElse) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#if 0\n"
                  "int first = 1;\n"
                  "#elif 0\n"
@@ -2378,7 +2365,7 @@ TEST_F(PreprocessorTest, ElifWithElse) {
 
 // Test variadic macro with no variadic args
 TEST_F(PreprocessorTest, VariadicMacroNoVariadicArgs) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define DEBUG(fmt, ...) printf(fmt, ##__VA_ARGS__)\n"
                  "DEBUG(\"hello\");");
   pp.EnterMainFile();
@@ -2394,7 +2381,7 @@ TEST_F(PreprocessorTest, VariadicMacroNoVariadicArgs) {
 
 // Test variadic macro with only variadic args
 TEST_F(PreprocessorTest, VariadicMacroOnlyVariadicArgs) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define LOG(...) printf(__VA_ARGS__)\n"
                  "LOG(\"%d %d\", 1, 2);");
   pp.EnterMainFile();
@@ -2413,7 +2400,7 @@ TEST_F(PreprocessorTest, VariadicMacroOnlyVariadicArgs) {
 
 // Test macro that expands to directive name
 TEST_F(PreprocessorTest, MacroExpandsToDirectiveName) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define DIRECTIVE define\n"
                  "#DIRECTIVE VALUE 42\n"
                  "int x = VALUE;");
@@ -2426,7 +2413,7 @@ TEST_F(PreprocessorTest, MacroExpandsToDirectiveName) {
 
 // Test macro expansion in #include path
 TEST_F(PreprocessorTest, MacroInIncludePath) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define HEADER \"stdio.h\"\n"
                  "#include HEADER\n"
                  "int x = 1;");
@@ -2442,7 +2429,7 @@ TEST_F(PreprocessorTest, MacroInIncludePath) {
 
 // Test __COUNTER__ macro (if supported)
 TEST_F(PreprocessorTest, CounterMacro) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("int a = __COUNTER__;\n"
                  "int b = __COUNTER__;\n"
                  "int c = __COUNTER__;");
@@ -2459,7 +2446,7 @@ TEST_F(PreprocessorTest, CounterMacro) {
 
 // Test line directive with just number
 TEST_F(PreprocessorTest, LineDirectiveJustNumber) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("int a = 1;\n"
                  "#line 100\n"
                  "int b = 2;\n");
@@ -2471,7 +2458,7 @@ TEST_F(PreprocessorTest, LineDirectiveJustNumber) {
 
 // Test error directive with empty message
 TEST_F(PreprocessorTest, ErrorDirectiveEmptyMessage) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("int before = 1;\n"
                  "#error\n"
                  "int after = 2;");
@@ -2487,7 +2474,7 @@ TEST_F(PreprocessorTest, ErrorDirectiveEmptyMessage) {
 
 // Test pragma with no tokens
 TEST_F(PreprocessorTest, PragmaNoTokens) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#pragma\n"
                  "int x = 1;");
   pp.EnterMainFile();
@@ -2502,7 +2489,7 @@ TEST_F(PreprocessorTest, PragmaNoTokens) {
 
 // Test macro argument with comma in nested parens
 TEST_F(PreprocessorTest, MacroArgWithCommaInNestedParens) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define INVOKE(fn, arg) fn(arg)\n"
                   "int result = INVOKE(foo, (1, 2, 3));\n");
   pp.EnterMainFile();
@@ -2526,7 +2513,7 @@ TEST_F(PreprocessorTest, MacroArgWithCommaInNestedParens) {
 
 // Test empty macro used as argument
 TEST_F(PreprocessorTest, EmptyMacroAsArgument) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define EMPTY\n"
                  "#define ID(x) x\n"
                  "int result = ID(EMPTY);");
@@ -2542,7 +2529,7 @@ TEST_F(PreprocessorTest, EmptyMacroAsArgument) {
 
 // Test self-referencing macro with token paste
 TEST_F(PreprocessorTest, SelfReferencingWithTokenPaste) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define SELF SELF\n"
                  "#define PASTE(x) x ## _suffix\n"
                  "int result = PASTE(SELF);");
@@ -2559,7 +2546,7 @@ TEST_F(PreprocessorTest, SelfReferencingWithTokenPaste) {
 
 // Test conditional with missing #endif
 TEST_F(PreprocessorTest, MissingEndif) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#if 1\n"
                  "int x = 1;\n"
                  "#if 0\n"
@@ -2576,7 +2563,7 @@ TEST_F(PreprocessorTest, MissingEndif) {
 
 // Test multiple #else in same conditional (error case)
 TEST_F(PreprocessorTest, MultipleElseInConditional) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#if 1\n"
                  "int first = 1;\n"
                  "#else\n"
@@ -2592,7 +2579,7 @@ TEST_F(PreprocessorTest, MultipleElseInConditional) {
 
 // Test #else before #elif (error case)
 TEST_F(PreprocessorTest, ElseBeforeElif) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#if 0\n"
                  "int first = 1;\n"
                  "#else\n"
@@ -2608,7 +2595,7 @@ TEST_F(PreprocessorTest, ElseBeforeElif) {
 
 // Test __FILE__ and __LINE__ in different contexts
 TEST_F(PreprocessorTest, FileAndLineMacros) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("const char* f1 = __FILE__;\n"
                  "int l1 = __LINE__;\n"
                  "int l2 = __LINE__;\n"
@@ -2622,7 +2609,7 @@ TEST_F(PreprocessorTest, FileAndLineMacros) {
 
 // Test macro defined on command line style
 TEST_F(PreprocessorTest, SimpleObjectLikeMacros) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define ONE 1\n"
                   "int x = ONE;");
   pp.EnterMainFile();
@@ -2637,7 +2624,7 @@ TEST_F(PreprocessorTest, SimpleObjectLikeMacros) {
 
 // Test very long macro replacement
 TEST_F(PreprocessorTest, VeryLongMacroReplacement) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define LONG a + b + c + d + e + f + g + h + i + j + k + l + "
                  "m + n + o + p\n"
                  "int result = LONG;");
@@ -2653,7 +2640,7 @@ TEST_F(PreprocessorTest, VeryLongMacroReplacement) {
 
 // Test macro with only whitespace in replacement
 TEST_F(PreprocessorTest, MacroWithOnlyWhitespace) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define SPACE   \n"
                  "int SPACE x = 1;");
   pp.EnterMainFile();
@@ -2668,7 +2655,7 @@ TEST_F(PreprocessorTest, MacroWithOnlyWhitespace) {
 
 // Test __func__ predefined identifier (if supported)
 TEST_F(PreprocessorTest, FuncIdentifier) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("const char* name = __func__;");
   pp.EnterMainFile();
 
@@ -2684,7 +2671,7 @@ TEST_F(PreprocessorTest, FuncIdentifier) {
 
 // Test line continuation in macro definition
 TEST_F(PreprocessorTest, LineContinuationInMacro) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define MULTI_LINE(x) \\\n"
                  "    do { \\\n"
                  "        x++; \\\n"
@@ -2699,7 +2686,7 @@ TEST_F(PreprocessorTest, LineContinuationInMacro) {
 
 // Test line continuation at end of file
 TEST_F(PreprocessorTest, LineContinuationAtEOF) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define INCOMPLETE \\");
   pp.EnterMainFile();
 
@@ -2710,7 +2697,7 @@ TEST_F(PreprocessorTest, LineContinuationAtEOF) {
 
 // Test macro with many parameters
 TEST_F(PreprocessorTest, MacroWithManyParameters) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define MANY(a, b, c, d, e, f, g, h) a+b+c+d+e+f+g+h\n"
                  "int result = MANY(1, 2, 3, 4, 5, 6, 7, 8);");
   pp.EnterMainFile();
@@ -2722,7 +2709,7 @@ TEST_F(PreprocessorTest, MacroWithManyParameters) {
 
 // Test macro invocation spanning multiple lines
 TEST_F(PreprocessorTest, MacroInvocationMultipleLines) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define ADD(a, b) ((a) + (b))\n"
                  "int result = ADD(\n"
                  "    1,\n"
@@ -2748,7 +2735,7 @@ TEST_F(PreprocessorTest, MacroInvocationMultipleLines) {
 
 // Test macro name that is a keyword
 TEST_F(PreprocessorTest, MacroNameIsKeyword) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define int float\n"
                  "int x;");
   pp.EnterMainFile();
@@ -2762,7 +2749,7 @@ TEST_F(PreprocessorTest, MacroNameIsKeyword) {
 
 // Test #if with 0 and else
 TEST_F(PreprocessorTest, IfZeroWithElse) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#if 0\n"
                  "int hidden = 1;\n"
                  "#else\n"
@@ -2780,7 +2767,7 @@ TEST_F(PreprocessorTest, IfZeroWithElse) {
 }
 
 TEST_F(PreprocessorTest, SplitElseWithCommentedBraceAfterEndif) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define X 1\n"
                  "int f(){\n"
                  "  if(2){\n"
@@ -2807,7 +2794,7 @@ TEST_F(PreprocessorTest, SplitElseWithCommentedBraceAfterEndif) {
 
 // Test nested #if 0 blocks
 TEST_F(PreprocessorTest, NestedIfZeroBlocks) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#if 0\n"
                  "  #if 1\n"
                  "    int inner = 1;\n"
@@ -2825,7 +2812,7 @@ TEST_F(PreprocessorTest, NestedIfZeroBlocks) {
 
 // Test #if with negative number
 TEST_F(PreprocessorTest, IfWithNegativeNumber) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#if -1\n"
                  "int negative = 1;\n"
                  "#endif\n");
@@ -2838,7 +2825,7 @@ TEST_F(PreprocessorTest, IfWithNegativeNumber) {
 
 // Test #if with hex number
 TEST_F(PreprocessorTest, IfWithHexNumber) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#if 0x10\n"
                  "int hex = 1;\n"
                  "#endif\n");
@@ -2851,7 +2838,7 @@ TEST_F(PreprocessorTest, IfWithHexNumber) {
 
 // Test #if with octal number
 TEST_F(PreprocessorTest, IfWithOctalNumber) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#if 010\n"
                  "int octal = 1;\n"
                  "#endif\n");
@@ -2864,7 +2851,7 @@ TEST_F(PreprocessorTest, IfWithOctalNumber) {
 
 // Test #if with character constant
 TEST_F(PreprocessorTest, IfWithCharacterConstant) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#if 'a'\n"
                  "int ch = 1;\n"
                  "#endif\n");
@@ -2877,7 +2864,7 @@ TEST_F(PreprocessorTest, IfWithCharacterConstant) {
 
 // Test stringification with complex argument
 TEST_F(PreprocessorTest, StringifyComplexArgument) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define STR(x) #x\n"
                  "const char* s = STR(1 + 2 * 3);");
   pp.EnterMainFile();
@@ -2895,7 +2882,7 @@ TEST_F(PreprocessorTest, StringifyComplexArgument) {
 
 // Test stringification with string argument
 TEST_F(PreprocessorTest, StringifyStringArgument) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define STR(x) #x\n"
                  "const char* s = STR(\"hello\");");
   pp.EnterMainFile();
@@ -2912,7 +2899,7 @@ TEST_F(PreprocessorTest, StringifyStringArgument) {
 
 // Test token paste creating valid identifier
 TEST_F(PreprocessorTest, TokenPasteValidIdentifier) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define CONCAT(a, b) a ## b\n"
                  "#define PREFIX var_\n"
                  "int CONCAT(PREFIX, 1) = 1;\n"
@@ -2927,7 +2914,7 @@ TEST_F(PreprocessorTest, TokenPasteValidIdentifier) {
 
 // Test token paste with a multi-token argument sequence
 TEST_F(PreprocessorTest, TokenPasteWithMultiTokenArgument) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define A a b\n"
                  "#define CAT(x, y) x ## y\n"
                  "CAT(A, c)");
@@ -2940,7 +2927,7 @@ TEST_F(PreprocessorTest, TokenPasteWithMultiTokenArgument) {
 
 // Test token paste creating number
 TEST_F(PreprocessorTest, TokenPasteNumber) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define NUM(a, b) a ## b\n"
                  "int x = NUM(12, 34);");
   pp.EnterMainFile();
@@ -2955,7 +2942,7 @@ TEST_F(PreprocessorTest, TokenPasteNumber) {
 
 // Test token paste with empty left operand
 TEST_F(PreprocessorTest, TokenPasteEmptyLeft) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define PASTE(a, b) a ## b\n"
                  "#define EMPTY\n"
                  "int x = PASTE(EMPTY, 123);");
@@ -2968,7 +2955,7 @@ TEST_F(PreprocessorTest, TokenPasteEmptyLeft) {
 
 // Test token paste with empty right operand
 TEST_F(PreprocessorTest, TokenPasteEmptyRight) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define PASTE(a, b) a ## b\n"
                  "#define EMPTY\n"
                  "int x = PASTE(123, EMPTY);");
@@ -2981,7 +2968,7 @@ TEST_F(PreprocessorTest, TokenPasteEmptyRight) {
 
 // Test # in object-like macro (should be literal)
 TEST_F(PreprocessorTest, HashInObjectLikeMacro) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define HASH #\n"
                  "int x = 1 HASH 2;");
   pp.EnterMainFile();
@@ -2999,7 +2986,7 @@ TEST_F(PreprocessorTest, HashInObjectLikeMacro) {
 
 // Test ## in object-like macro (should be literal)
 TEST_F(PreprocessorTest, HashHashInObjectLikeMacro) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define PASTE_OP ##\n"
                  "int x = 1 PASTE_OP 2;");
   pp.EnterMainFile();
@@ -3011,7 +2998,7 @@ TEST_F(PreprocessorTest, HashHashInObjectLikeMacro) {
 
 // Test macro expansion in array size
 TEST_F(PreprocessorTest, MacroInArraySize) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define SIZE 10\n"
                  "int arr[SIZE];");
   pp.EnterMainFile();
@@ -3027,7 +3014,7 @@ TEST_F(PreprocessorTest, MacroInArraySize) {
 
 // Test macro expansion in function declaration
 TEST_F(PreprocessorTest, MacroInFunctionDeclaration) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define RET_TYPE int\n"
                  "#define PARAM char*\n"
                  "RET_TYPE func(PARAM p);");
@@ -3046,7 +3033,7 @@ TEST_F(PreprocessorTest, MacroInFunctionDeclaration) {
 
 // Test recursive macro chain (A -> B -> A)
 TEST_F(PreprocessorTest, RecursiveMacroChain) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define A B\n"
                  "#define B A\n"
                  "int x = A;");
@@ -3062,7 +3049,7 @@ TEST_F(PreprocessorTest, RecursiveMacroChain) {
 
 // Test mutually recursive macros
 TEST_F(PreprocessorTest, MutuallyRecursiveMacros) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define FOO(x) BAR(x)\n"
                  "#define BAR(x) FOO(x)\n"
                  "int x = FOO(1);");
@@ -3075,7 +3062,7 @@ TEST_F(PreprocessorTest, MutuallyRecursiveMacros) {
 
 // Test macro that expands to another macro invocation
 TEST_F(PreprocessorTest, MacroExpandsToMacroInvocation) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define DOUBLE(x) ((x) + (x))\n"
                  "#define INVOKE_DOUBLE(x) DOUBLE(x)\n"
                  "int x = INVOKE_DOUBLE(5);");
@@ -3099,7 +3086,7 @@ TEST_F(PreprocessorTest, MacroExpandsToMacroInvocation) {
 
 // Test #warning directive
 TEST_F(PreprocessorTest, WarningDirective) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("int before = 1;\n"
                  "#warning This is a warning\n"
                  "int after = 2;");
@@ -3115,7 +3102,7 @@ TEST_F(PreprocessorTest, WarningDirective) {
 
 // Test #if with defined() in expression
 TEST_F(PreprocessorTest, DefinedInComplexExpression) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define FOO 1\n"
                  "#if defined(FOO) && FOO\n"
                  "int active = 1;\n"
@@ -3129,7 +3116,7 @@ TEST_F(PreprocessorTest, DefinedInComplexExpression) {
 
 // Test #if with !defined()
 TEST_F(PreprocessorTest, NotDefined) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#if !defined(NOT_DEFINED)\n"
                  "int active = 1;\n"
                  "#endif\n");
@@ -3142,7 +3129,7 @@ TEST_F(PreprocessorTest, NotDefined) {
 
 // Test #if with comparison
 TEST_F(PreprocessorTest, IfWithComparison) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define VERSION 5\n"
                  "#if VERSION >= 3\n"
                  "int new_version = 1;\n"
@@ -3158,7 +3145,7 @@ TEST_F(PreprocessorTest, IfWithComparison) {
 
 // Test #if with bitwise operators
 TEST_F(PreprocessorTest, IfWithBitwiseOperators) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#if (1 << 2) == 4\n"
                  "int shift_ok = 1;\n"
                  "#endif\n");
@@ -3171,7 +3158,7 @@ TEST_F(PreprocessorTest, IfWithBitwiseOperators) {
 
 // Test #if with ternary operator
 TEST_F(PreprocessorTest, IfWithTernaryOperator) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#if 1 ? 2 : 3\n"
                  "int ternary = 1;\n"
                  "#endif\n");
@@ -3184,7 +3171,7 @@ TEST_F(PreprocessorTest, IfWithTernaryOperator) {
 
 // Test comment inside macro argument
 TEST_F(PreprocessorTest, CommentInMacroArgument) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define ADD(a, b) ((a) + (b))\n"
                  "int x = ADD(1 /* first */, 2 /* second */);");
   pp.EnterMainFile();
@@ -3208,7 +3195,7 @@ TEST_F(PreprocessorTest, CommentInMacroArgument) {
 
 // Test block comment spanning multiple lines in macro
 TEST_F(PreprocessorTest, BlockCommentInMacro) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define CODE /* comment */ 42\n"
                  "int x = CODE;");
   pp.EnterMainFile();
@@ -3223,7 +3210,7 @@ TEST_F(PreprocessorTest, BlockCommentInMacro) {
 
 // Test #define with no name (error case)
 TEST_F(PreprocessorTest, DefineWithNoName) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define\n"
                  "int x = 1;");
   pp.EnterMainFile();
@@ -3239,7 +3226,7 @@ TEST_F(PreprocessorTest, DefineWithNoName) {
 
 // Test #define with special characters in replacement
 TEST_F(PreprocessorTest, DefineWithSpecialCharacters) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define SYMBOLS !@#$%^&*\n"
                  "char* s = SYMBOLS;");
   pp.EnterMainFile();
@@ -3251,7 +3238,7 @@ TEST_F(PreprocessorTest, DefineWithSpecialCharacters) {
 
 // Test empty #include (error case)
 TEST_F(PreprocessorTest, EmptyInclude) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#include\n"
                  "int x = 1;");
   pp.EnterMainFile();
@@ -3266,7 +3253,7 @@ TEST_F(PreprocessorTest, EmptyInclude) {
 
 // Test #include with malformed path
 TEST_F(PreprocessorTest, MalformedIncludePath) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#include <missing_close\n"
                  "int x = 1;");
   pp.EnterMainFile();
@@ -3281,7 +3268,7 @@ TEST_F(PreprocessorTest, MalformedIncludePath) {
 
 // Test #line with string
 TEST_F(PreprocessorTest, LineDirectiveWithFile) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#line 100 \"custom.c\"\n"
                  "int x = 1;");
   pp.EnterMainFile();
@@ -3293,7 +3280,7 @@ TEST_F(PreprocessorTest, LineDirectiveWithFile) {
 
 // Test #line with very large number
 TEST_F(PreprocessorTest, LineDirectiveLargeNumber) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#line 999999999\n"
                  "int x = 1;");
   pp.EnterMainFile();
@@ -3305,7 +3292,7 @@ TEST_F(PreprocessorTest, LineDirectiveLargeNumber) {
 
 // Test #pragma with complex tokens
 TEST_F(PreprocessorTest, PragmaWithComplexTokens) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#pragma GCC diagnostic push\n"
                  "#pragma GCC diagnostic ignored \"-Wall\"\n"
                  "int x = 1;\n"
@@ -3324,7 +3311,7 @@ TEST_F(PreprocessorTest, PragmaWithComplexTokens) {
 
 // Test macro used before definition
 TEST_F(PreprocessorTest, MacroUsedBeforeDefinition) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("int x = UNDEFINED_MACRO;\n"
                  "#define UNDEFINED_MACRO 42\n"
                  "int y = UNDEFINED_MACRO;");
@@ -3350,7 +3337,7 @@ TEST_F(PreprocessorTest, MacroUsedBeforeDefinition) {
 
 // Test nested #include guard simulation
 TEST_F(PreprocessorTest, NestedIncludeGuardSimulation) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#ifndef HEADER_H\n"
                  "#define HEADER_H\n"
                  "#ifndef INNER_H\n"
@@ -3368,7 +3355,7 @@ TEST_F(PreprocessorTest, NestedIncludeGuardSimulation) {
 
 // Test macro expansion order
 TEST_F(PreprocessorTest, MacroExpansionOrder) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define FIRST 1\n"
                  "#define SECOND FIRST + 2\n"
                  "#define THIRD SECOND + 3\n"
@@ -3389,7 +3376,7 @@ TEST_F(PreprocessorTest, MacroExpansionOrder) {
 
 // Test function-like macro with no space after define
 TEST_F(PreprocessorTest, FunctionLikeMacroNoSpace) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#defineFUNC(x) x\n"
                  "int x = FUNC(1);");
   pp.EnterMainFile();
@@ -3400,7 +3387,7 @@ TEST_F(PreprocessorTest, FunctionLikeMacroNoSpace) {
 
 // Test macro with backslash at end of replacement
 TEST_F(PreprocessorTest, MacroWithTrailingBackslash) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define END_BACKSLASH value\\\n"
                  "\n"
                  "int x = END_BACKSLASH;");
@@ -3417,7 +3404,7 @@ TEST_F(PreprocessorTest, MacroWithTrailingBackslash) {
 
 // Test #if 1 with nothing after
 TEST_F(PreprocessorTest, IfOneNoEndif) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#if 1");
   pp.EnterMainFile();
 
@@ -3427,7 +3414,7 @@ TEST_F(PreprocessorTest, IfOneNoEndif) {
 
 // Test deeply nested conditionals
 TEST_F(PreprocessorTest, DeeplyNestedConditionals) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#if 1\n"
                  "  #if 1\n"
                  "    #if 1\n"
@@ -3446,7 +3433,7 @@ TEST_F(PreprocessorTest, DeeplyNestedConditionals) {
 
 // Test multiple macros on same line
 TEST_F(PreprocessorTest, MultipleMacrosSameLine) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define A 1\n"
                  "#define B 2\n"
                  "#define C 3\n"
@@ -3467,7 +3454,7 @@ TEST_F(PreprocessorTest, MultipleMacrosSameLine) {
 
 // Test macro that expands to nothing multiple times
 TEST_F(PreprocessorTest, EmptyMacroMultipleTimes) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define EMPTY\n"
                  "EMPTY EMPTY EMPTY int x = 1; EMPTY EMPTY EMPTY");
   pp.EnterMainFile();
@@ -3482,7 +3469,7 @@ TEST_F(PreprocessorTest, EmptyMacroMultipleTimes) {
 
 // Test __DATE__ and __TIME__ macros
 TEST_F(PreprocessorTest, DateAndTimeMacros) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("const char* date = __DATE__;\n"
                  "const char* time = __TIME__;");
   pp.EnterMainFile();
@@ -3499,7 +3486,7 @@ TEST_F(PreprocessorTest, DateAndTimeMacros) {
 
 // Test macro that expands to __LINE__
 TEST_F(PreprocessorTest, MacroExpandsToLine) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define GET_LINE __LINE__\n"
                  "int line1 = GET_LINE;\n"
                  "int line2 = GET_LINE;");
@@ -3517,7 +3504,7 @@ TEST_F(PreprocessorTest, MacroExpandsToLine) {
 
 // Test function-like macro invoked with no tokens in args
 TEST_F(PreprocessorTest, FunctionLikeMacroNoTokensInArgs) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define FUNC(a, b) a b\n"
                  "int x = FUNC(,);");
   pp.EnterMainFile();
@@ -3535,7 +3522,7 @@ TEST_F(PreprocessorTest, FunctionLikeMacroNoTokensInArgs) {
 
 // Test __VA_OPT__ with empty __VA_ARGS__
 TEST_F(PreprocessorTest, VaOptWithEmptyArgs) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define LOG(fmt, ...) printf(fmt __VA_OPT__(,) __VA_ARGS__)\n"
                  "LOG(\"hello\");");
   pp.EnterMainFile();
@@ -3552,7 +3539,7 @@ TEST_F(PreprocessorTest, VaOptWithEmptyArgs) {
 
 // Test __VA_OPT__ with non-empty __VA_ARGS__
 TEST_F(PreprocessorTest, VaOptWithNonEmptyArgs) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define LOG(fmt, ...) printf(fmt __VA_OPT__(,) __VA_ARGS__)\n"
                  "LOG(\"%d %d\", 1, 2);");
   pp.EnterMainFile();
@@ -3573,7 +3560,7 @@ TEST_F(PreprocessorTest, VaOptWithNonEmptyArgs) {
 
 // Test __VA_OPT__ with complex content
 TEST_F(PreprocessorTest, VaOptWithComplexContent) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile(
       "#define WRAP(...) { __VA_OPT__(int arr[] = {__VA_ARGS__};) }\n"
       "WRAP();\n"
@@ -3605,7 +3592,7 @@ TEST_F(PreprocessorTest, VaOptWithComplexContent) {
 
 // Test __VA_OPT__ with nested parentheses
 TEST_F(PreprocessorTest, VaOptWithNestedParens) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define M(...) f(1 __VA_OPT__(+ (2 + 3)) __VA_ARGS__)\n"
                  "M();\n"
                  "M(x);");
@@ -3636,7 +3623,7 @@ TEST_F(PreprocessorTest, VaOptWithNestedParens) {
 
 // Test __VA_OPT__ with only __VA_OPT__
 TEST_F(PreprocessorTest, VaOptAlone) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define EMPTY(...) __VA_OPT__(x)\n"
                  "EMPTY();\n"
                  "EMPTY(a);");
@@ -3654,7 +3641,7 @@ TEST_F(PreprocessorTest, VaOptAlone) {
 // Assembly-style \name macro parameter treated as identifier
 // (GAS .macro / .endm blocks use \ for macro parameters).
 TEST_F(PreprocessorTest, BackslashIdentifier) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("\\newinstr2\n");
   pp.EnterMainFile();
   std::vector<Token> tokens = LexAll(pp);
@@ -3665,7 +3652,7 @@ TEST_F(PreprocessorTest, BackslashIdentifier) {
 
 // Multiple \name tokens in a row
 TEST_F(PreprocessorTest, MultipleBackslashIdentifiers) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("\\oldinstr \\newinstr \\ft_flags\n");
   pp.EnterMainFile();
   std::vector<Token> tokens = LexAll(pp);
@@ -3680,7 +3667,7 @@ TEST_F(PreprocessorTest, MultipleBackslashIdentifiers) {
 
 // Stray \ followed by a non-identifier character still produces kUnknown
 TEST_F(PreprocessorTest, StrayBackslashWithDigit) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("\\123\n");
   pp.EnterMainFile();
   std::vector<Token> tokens = LexAll(pp);
@@ -3691,7 +3678,7 @@ TEST_F(PreprocessorTest, StrayBackslashWithDigit) {
 
 // GNU named-variadic `name...` syntax: stringification of a simple arg
 TEST_F(PreprocessorTest, NamedVariadicStringify) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define STR(x...) #x\n"
              "const char* s = STR(hello);");
   pp.EnterMainFile();
@@ -3704,7 +3691,7 @@ TEST_F(PreprocessorTest, NamedVariadicStringify) {
 
 // Named-variadic with nested parens in the argument
 TEST_F(PreprocessorTest, NamedVariadicStringifyNestedParens) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define STR(x...) #x\n"
              "const char* s = STR((x)(y));");
   pp.EnterMainFile();
@@ -3717,7 +3704,7 @@ TEST_F(PreprocessorTest, NamedVariadicStringifyNestedParens) {
 
 // Named-variadic stringification of an empty arg
 TEST_F(PreprocessorTest, NamedVariadicStringifyEmpty) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define STR(x...) #x\n"
              "const char* s = STR();");
   pp.EnterMainFile();
@@ -3731,7 +3718,7 @@ TEST_F(PreprocessorTest, NamedVariadicStringifyEmpty) {
 // Named-variadic with multi-token arg containing a comma at top level.
 // The named variadic parameter captures all comma-separated groups.
 TEST_F(PreprocessorTest, NamedVariadicStringifyCommaArg) {
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   CreateFile("#define STR(x...) #x\n"
              "const char* s = STR(a, b);");
   pp.EnterMainFile();

@@ -53,8 +53,10 @@ TEST(IdentifierTableTest, ClassifiesCKeywords) {
     TokenKind kind;
   };
   const Case cases[] = {
-      {"int", TokenKind::kInt},         {"auto", TokenKind::kAuto},
-      {"while", TokenKind::kWhile},     {"_Bool", TokenKind::kBool},
+      {"int", TokenKind::kInt},
+      {"auto", TokenKind::kAuto},
+      {"while", TokenKind::kWhile},
+      {"_Bool", TokenKind::kBool},
       {"_Static_assert", TokenKind::kStaticAssert},
       {"_Thread_local", TokenKind::kThreadLocal},
   };
@@ -77,8 +79,7 @@ TEST(IdentifierTableTest, ClassifiesPreprocessorKeywords) {
 
   EXPECT_EQ(table.Get("define").GetPPKeyword(), PPKeyword::kDefine);
   EXPECT_EQ(table.Get("defined").GetPPKeyword(), PPKeyword::kDefined);
-  EXPECT_EQ(table.Get("__has_include").GetPPKeyword(),
-            PPKeyword::kHasInclude);
+  EXPECT_EQ(table.Get("__has_include").GetPPKeyword(), PPKeyword::kHasInclude);
 }
 
 TEST(IdentifierTableTest, SpellingCanBeBothCKeywordAndPPKeyword) {

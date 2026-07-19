@@ -5,8 +5,9 @@
 #include "bcc/basic/diagnostic.hh"
 #include "bcc/basic/file_manager.hh"
 #include "bcc/basic/source_manager.hh"
-#include "bcc/pp/preprocessor.hh"
 #include "bcc/lex/token_kind.hh"
+#include "bcc/pp/header_search.hh"
+#include "bcc/pp/preprocessor.hh"
 #include "gtest/gtest.h"
 
 namespace bcc {
@@ -17,12 +18,14 @@ class DirectiveTest : public ::testing::Test {
  protected:
   FileManager fm_;
   SourceManager sm_{fm_};
+  HeaderSearch hs_{fm_};
   DiagnosticsEngine diags_{nullptr, &sm_};
 
   std::vector<Token> LexTokens(std::string_view content,
                                std::string_view name = "main.c") {
-    sm_.SetMainFileID(sm_.CreateFileID(std::string(name), std::string(content)));
-    pp_ = std::make_unique<Preprocessor>(sm_, diags_);
+    sm_.SetMainFileID(
+        sm_.CreateFileID(std::string(name), std::string(content)));
+    pp_ = std::make_unique<Preprocessor>(sm_, diags_, hs_);
     pp_->EnterMainFile();
 
     std::vector<Token> out;
@@ -97,7 +100,8 @@ TEST_F(DirectiveTest, LineDirectiveOverridesLineNumber) {
 }
 
 TEST_F(DirectiveTest, LineDirectiveOverridesFilename) {
-  std::vector<Token> toks = LexTokens("#line 10 \"gen.y\"\n__FILE__ __LINE__\n");
+  std::vector<Token> toks =
+      LexTokens("#line 10 \"gen.y\"\n__FILE__ __LINE__\n");
   ASSERT_EQ(toks.size(), 2u);
   EXPECT_EQ(toks[0].GetLexeme(), "\"gen.y\"");
   EXPECT_EQ(toks[1].GetLexeme(), "10");
@@ -156,7 +160,8 @@ TEST_F(DirectiveTest, BaseFileBuiltinIsMainFileName) {
 }
 
 TEST_F(DirectiveTest, FileNameBuiltinIsLastComponent) {
-  std::vector<Token> toks = LexTokens("__FILE_NAME__\n", "/home/user/src/main.c");
+  std::vector<Token> toks =
+      LexTokens("__FILE_NAME__\n", "/home/user/src/main.c");
   ASSERT_EQ(toks.size(), 1u);
   EXPECT_EQ(toks[0].GetKind(), TokenKind::kStringLiteral);
   EXPECT_EQ(toks[0].GetLexeme(), "\"main.c\"");
@@ -220,8 +225,8 @@ TEST_F(DirectiveTest, PoisonAfterDefineWarns) {
 
 TEST_F(DirectiveTest, PoisonDoesNotReportOnNonIdentifierTokens) {
   Spellings("#pragma GCC poison foo\nint x = 1;\n");
-  // Only the 'foo' usage would trigger an error; 'int', 'x', '=', '1', ';' are fine.
-  // Since foo is not used, no errors.
+  // Only the 'foo' usage would trigger an error; 'int', 'x', '=', '1', ';' are
+  // fine. Since foo is not used, no errors.
   EXPECT_EQ(diags_.NumErrors(), 0u);
 }
 
@@ -244,12 +249,14 @@ TEST_F(DirectiveTest, SccsDirectiveIsSilentlyIgnored) {
 //===----------------------------------------------------------------------===//
 
 TEST_F(DirectiveTest, PushMacroSavesAndPopMacroRestores) {
-  // Define a macro, push it, undefine it, pop it — the definition should return.
-  std::vector<Token> toks = LexTokens("#define X 1\n"
-                                       "#pragma push_macro(\"X\")\n"
-                                       "#undef X\n"
-                                       "#pragma pop_macro(\"X\")\n"
-                                       "X\n");
+  // Define a macro, push it, undefine it, pop it — the definition should
+  // return.
+  std::vector<Token> toks = LexTokens(
+      "#define X 1\n"
+      "#pragma push_macro(\"X\")\n"
+      "#undef X\n"
+      "#pragma pop_macro(\"X\")\n"
+      "X\n");
   ASSERT_EQ(toks.size(), 1u);
   EXPECT_EQ(toks[0].GetLexeme(), "1");
 }
@@ -276,7 +283,8 @@ TEST_F(DirectiveTest, ClangNamespacePoisonWorks) {
 TEST_F(DirectiveTest, STdcPragmaIsSilentlyAccepted) {
   EXPECT_EQ(Spellings("#pragma STDC FENV_ACCESS ON\nok\n"), (V{"ok"}));
   EXPECT_EQ(Spellings("#pragma STDC FP_CONTRACT OFF\nok\n"), (V{"ok"}));
-  EXPECT_EQ(Spellings("#pragma STDC CX_LIMITED_RANGE DEFAULT\nok\n"), (V{"ok"}));
+  EXPECT_EQ(Spellings("#pragma STDC CX_LIMITED_RANGE DEFAULT\nok\n"),
+            (V{"ok"}));
 }
 
 //===----------------------------------------------------------------------===//
@@ -291,7 +299,8 @@ TEST_F(DirectiveTest, GccSystemHeaderPragmaIsSilentlyAccepted) {
 TEST_F(DirectiveTest, GccDependencyPragmaIsSilentlyAccepted) {
   // We can't easily test the full timestamp comparison, but we can verify
   // it doesn't crash and accepts the syntax.
-  EXPECT_EQ(Spellings("#pragma GCC dependency \"nonexistent.h\"\nok\n"), (V{"ok"}));
+  EXPECT_EQ(Spellings("#pragma GCC dependency \"nonexistent.h\"\nok\n"),
+            (V{"ok"}));
   EXPECT_EQ(diags_.NumErrors(), 0u);
 }
 

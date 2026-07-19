@@ -4,9 +4,10 @@
 #include "bcc/basic/diagnostic.hh"
 #include "bcc/basic/file_manager.hh"
 #include "bcc/basic/source_manager.hh"
+#include "bcc/lex/token_kind.hh"
+#include "bcc/pp/header_search.hh"
 #include "bcc/pp/identifier_table.hh"
 #include "bcc/pp/preprocessor.hh"
-#include "bcc/lex/token_kind.hh"
 #include "gtest/gtest.h"
 
 namespace bcc {
@@ -16,6 +17,7 @@ class MacroExpansionTest : public ::testing::Test {
  protected:
   FileManager fm_;
   SourceManager sm_{fm_};
+  HeaderSearch hs_{fm_};
   DiagnosticsEngine diags_{nullptr, &sm_};
 
   FileID Main(std::string_view content) {
@@ -38,7 +40,7 @@ class MacroExpansionTest : public ::testing::Test {
 
 TEST_F(MacroExpansionTest, ExpandsObjectLikeMacro) {
   Main("#define X 1\nX");
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   pp.EnterMainFile();
 
   EXPECT_EQ(Expand(pp), (std::vector<std::string>{"1"}));
@@ -46,7 +48,7 @@ TEST_F(MacroExpansionTest, ExpandsObjectLikeMacro) {
 
 TEST_F(MacroExpansionTest, ExpandsToMultipleTokens) {
   Main("#define TWO 1 2\nTWO");
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   pp.EnterMainFile();
 
   EXPECT_EQ(Expand(pp), (std::vector<std::string>{"1", "2"}));
@@ -54,7 +56,7 @@ TEST_F(MacroExpansionTest, ExpandsToMultipleTokens) {
 
 TEST_F(MacroExpansionTest, ExpandedTokensCarrySpellingAndExpansionLocations) {
   Main("#define TWO 1 2\nTWO");
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   pp.EnterMainFile();
 
   Token t1 = pp.Lex();  // 1
@@ -80,7 +82,7 @@ TEST_F(MacroExpansionTest, ExpandedTokensCarrySpellingAndExpansionLocations) {
 
 TEST_F(MacroExpansionTest, RescansForNestedMacros) {
   Main("#define A B\n#define B 42\nA");
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   pp.EnterMainFile();
 
   EXPECT_EQ(Expand(pp), (std::vector<std::string>{"42"}));
@@ -88,7 +90,7 @@ TEST_F(MacroExpansionTest, RescansForNestedMacros) {
 
 TEST_F(MacroExpansionTest, SelfReferentialMacroExpandsOnce) {
   Main("#define X X\nX");
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   pp.EnterMainFile();
 
   Token t = pp.Lex();
@@ -100,7 +102,7 @@ TEST_F(MacroExpansionTest, SelfReferentialMacroExpandsOnce) {
 
 TEST_F(MacroExpansionTest, MutuallyRecursiveMacrosTerminate) {
   Main("#define A B\n#define B A\nA");
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   pp.EnterMainFile();
 
   Token t = pp.Lex();
@@ -112,7 +114,7 @@ TEST_F(MacroExpansionTest, MutuallyRecursiveMacrosTerminate) {
 
 TEST_F(MacroExpansionTest, UndefStopsExpansion) {
   Main("#define X 1\n#undef X\nX");
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   pp.EnterMainFile();
 
   Token t = pp.Lex();
@@ -123,7 +125,7 @@ TEST_F(MacroExpansionTest, UndefStopsExpansion) {
 
 TEST_F(MacroExpansionTest, EmptyMacroExpandsToNothing) {
   Main("#define E\nE after");
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   pp.EnterMainFile();
 
   EXPECT_EQ(Expand(pp), (std::vector<std::string>{"after"}));
@@ -131,7 +133,7 @@ TEST_F(MacroExpansionTest, EmptyMacroExpandsToNothing) {
 
 TEST_F(MacroExpansionTest, RedefinitionUsesLatestDefinition) {
   Main("#define X 1\n#define X 2\nX");
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   pp.EnterMainFile();
 
   EXPECT_EQ(Expand(pp), (std::vector<std::string>{"2"}));
@@ -139,7 +141,7 @@ TEST_F(MacroExpansionTest, RedefinitionUsesLatestDefinition) {
 
 TEST_F(MacroExpansionTest, TracksMacroDefinitionState) {
   Main("#define X 1\n#undef X\n");
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   pp.EnterMainFile();
 
   // Drive the preprocessor to end so both directives are processed.
@@ -153,7 +155,7 @@ TEST_F(MacroExpansionTest, TracksMacroDefinitionState) {
 
 TEST_F(MacroExpansionTest, NonMacroIdentifierIsUnchanged) {
   Main("foo");
-  Preprocessor pp(sm_, diags_);
+  Preprocessor pp(sm_, diags_, hs_);
   pp.EnterMainFile();
 
   Token t = pp.Lex();

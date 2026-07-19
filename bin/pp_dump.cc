@@ -27,8 +27,8 @@
 
 #include "bcc/basic/characteristic_kind.hh"
 #include "bcc/basic/diagnostic.hh"
-#include "bcc/basic/file_manager.hh"
 #include "bcc/basic/file_id.hh"
+#include "bcc/basic/file_manager.hh"
 #include "bcc/basic/presumed_loc.hh"
 #include "bcc/basic/source_manager.hh"
 #include "bcc/basic/text_diagnostic_printer.hh"
@@ -43,13 +43,13 @@
 namespace {
 
 struct Options {
-  bool no_line_markers = false;   // -P
-  bool dump_macros = false;       // -dM
-  bool retain_defines = false;    // -dD
-  bool keep_comments = false;     // -C
-  bool dep_makefile = false;      // -M or -MM
-  bool dep_user_only = false;     // -MM (exclude system headers)
-  std::string dep_target;         // -MT
+  bool no_line_markers = false;  // -P
+  bool dump_macros = false;      // -dM
+  bool retain_defines = false;   // -dD
+  bool keep_comments = false;    // -C
+  bool dep_makefile = false;     // -M or -MM
+  bool dep_user_only = false;    // -MM (exclude system headers)
+  std::string dep_target;        // -MT
   std::vector<std::string> include_dirs;
   const char* input_path = nullptr;
 };
@@ -90,7 +90,8 @@ Options ParseArgs(int argc, char* argv[]) {
 // Removes backslash-newline line splices from a raw lexeme so the emitted text
 // is the token's logical spelling.
 std::string CleanLexeme(std::string_view raw) {
-  if (raw.find('\\') == std::string_view::npos) return std::string(raw);  std::string out;
+  if (raw.find('\\') == std::string_view::npos) return std::string(raw);
+  std::string out;
   out.reserve(raw.size());
   for (std::size_t i = 0; i < raw.size();) {
     if (raw[i] == '\\' && i + 1 < raw.size()) {
@@ -143,9 +144,10 @@ class DefineRecorder : public bcc::PPCallbacks {
   void MacroDefined(const bcc::IdentifierInfo* name,
                     const bcc::MacroInfo* macro) override {
     bcc::PresumedLoc pl = sm_.GetPresumedLoc(macro->GetDefinitionLoc());
-    out_.push_back({bcc::FormatMacroDefine(*name, *macro),
-                    std::string(pl.IsValid() ? pl.filename : std::string_view{}),
-                    pl.IsValid() ? pl.line : 0u});
+    out_.push_back(
+        {bcc::FormatMacroDefine(*name, *macro),
+         std::string(pl.IsValid() ? pl.filename : std::string_view{}),
+         pl.IsValid() ? pl.line : 0u});
   }
 
  private:
@@ -363,8 +365,7 @@ int main(int argc, char* argv[]) {
 
   sm.SetMainFileID(sm.CreateFileID(*entry));
 
-  bcc::Preprocessor pp(sm, diag);
-  pp.SetHeaderSearch(header_search);
+  bcc::Preprocessor pp(sm, diag, header_search);
 
   pp.EnterMainFile();
 
@@ -400,8 +401,7 @@ int main(int argc, char* argv[]) {
     std::string target =
         opts.dep_target.empty() && opts.input_path
             ? DefaultTarget(opts.input_path)
-            : (opts.dep_target.empty() ? std::string("a.o")
-                                       : opts.dep_target);
+            : (opts.dep_target.empty() ? std::string("a.o") : opts.dep_target);
     std::cout << target << ':';
     if (opts.input_path) std::cout << ' ' << opts.input_path;
     for (const std::string& d : deps->deps_) std::cout << ' ' << d;
@@ -413,8 +413,7 @@ int main(int argc, char* argv[]) {
   // before Lexing so #define events are captured for interleaving.
   std::vector<RecordedDefine> recorded_defines;
   if (opts.retain_defines) {
-    pp.SetPPCallbacks(
-        std::make_unique<DefineRecorder>(sm, recorded_defines));
+    pp.SetPPCallbacks(std::make_unique<DefineRecorder>(sm, recorded_defines));
   }
 
   TextPrinter out(sm, std::cout, opts.no_line_markers, opts.keep_comments,

@@ -16,12 +16,6 @@
 
 namespace bcc {
 
-void Preprocessor::NoteNonGuardDirectiveAtFileScope() {
-  if (cur_lexer_->GetConditionalStackDepth() == 0) {
-    cur_lexer_->GetMIOpt().OtherTopLevelDirective();
-  }
-}
-
 namespace {
 
 std::string CleanTokenSpelling(const Token& token) {
@@ -132,6 +126,12 @@ std::string EncodePragmaMessageBytes(std::string_view bytes) {
 }
 
 }  // namespace
+
+void Preprocessor::NoteNonGuardDirectiveAtFileScope() {
+  if (cur_lexer_->GetConditionalStackDepth() == 0) {
+    cur_lexer_->GetMIOpt().OtherTopLevelDirective();
+  }
+}
 
 void Preprocessor::HandleDirective(Token& /*hash_tok*/) {
   // The rest of the line is a directive: turn its terminating newline into
@@ -436,33 +436,36 @@ std::optional<Preprocessor::HeaderName> Preprocessor::ParseHeaderName() {
 
 const FileEntry* Preprocessor::LookupHeader(const HeaderName& header,
                                             IncludeKind kind) {
-  if (header_search_ == nullptr) return nullptr;
-
   if (kind == IncludeKind::kIncludeNext) {
-    return header_search_->LookupFileNext(header.filename, header.is_angled,
-                                          GetCurrentFileDir());
+    return header_search_.LookupFileNext(header.filename, header.is_angled,
+                                         GetCurrentFileDir());
   }
-  return header_search_->LookupFile(header.filename, header.is_angled,
-                                    GetCurrentFileDir());
+  return header_search_.LookupFile(header.filename, header.is_angled,
+                                   GetCurrentFileDir());
 }
 
-bool Preprocessor::ShouldEnterHeader(const FileEntry* file, SourceLocation loc,
-                                     IncludeKind kind) {
-  const HeaderFileInfo* info = header_search_->GetExistingFileInfo(file);
-  if (kind == IncludeKind::kImport) {
-    if (info != nullptr && info->is_imported) return false;
-  } else if (info != nullptr) {
-    if (info->is_pragma_once || (info->controlling_macro != nullptr &&
-                                 IsMacroDefined(info->controlling_macro))) {
-      return false;
+auto Preprocessor::DecideHeaderEntry(
+    const FileEntry* file, IncludeKind kind) const -> HeaderEntryDecision {
+  const HeaderFileInfo* info = header_search_.GetExistingFileInfo(file);
+
+  if (info != nullptr) {
+    if (kind == IncludeKind::kImport && info->is_imported) {
+      return HeaderEntryDecision::kSkipAlreadyImported;
+    }
+    if (info->is_pragma_once) {
+      return HeaderEntryDecision::kSkipPragmaOnce;
+    }
+    if (info->controlling_macro != nullptr &&
+        IsMacroDefined(info->controlling_macro)) {
+      return HeaderEntryDecision::kSkipControllingMacro;
     }
   }
 
   if (GetIncludeStackDepth() >= kMaxIncludeDepth) {
-    diags_.Report(loc, diag::err_pp_include_too_deep);
-    return false;
+    return HeaderEntryDecision::kIncludeDepthExceeded;
   }
-  return true;
+
+  return HeaderEntryDecision::kEnter;
 }
 
 bool Preprocessor::EnterResolvedHeader(const FileEntry* file,
@@ -472,7 +475,7 @@ bool Preprocessor::EnterResolvedHeader(const FileEntry* file,
   if (!fid.IsValid()) return false;
 
   if (kind == IncludeKind::kImport) {
-    header_search_->SetFileImported(file);
+    header_search_.SetFileImported(file);
   }
 
   // kIncludeMacros currently enters the file normally, preserving the prior
@@ -491,7 +494,7 @@ bool Preprocessor::HandleIncludeCommon(Token& include_tok, IncludeKind kind) {
   const FileEntry* file = LookupHeader(*header, kind);
   if (callbacks_) {
     CharacteristicKind file_type =
-        file != nullptr ? header_search_->GetFileCharacteristic(file)
+        file != nullptr ? header_search_.GetFileCharacteristic(file)
                         : CharacteristicKind::kUser;
     callbacks_->InclusionDirective(include_tok.GetLocation(), header->filename,
                                    header->is_angled, file, file_type);
@@ -508,7 +511,17 @@ bool Preprocessor::HandleIncludeCommon(Token& include_tok, IncludeKind kind) {
     return false;
   }
 
-  if (!ShouldEnterHeader(file, header->location, kind)) return false;
+  switch (DecideHeaderEntry(file, kind)) {
+    case HeaderEntryDecision::kEnter:
+      break;
+    case HeaderEntryDecision::kSkipAlreadyImported:
+    case HeaderEntryDecision::kSkipPragmaOnce:
+    case HeaderEntryDecision::kSkipControllingMacro:
+      return false;
+    case HeaderEntryDecision::kIncludeDepthExceeded:
+      diags_.Report(header->location, diag::err_pp_include_too_deep);
+      return false;
+  }
 
   if (!EnterResolvedHeader(file, header->location, kind)) {
     diags_.Report(header->location, kind == IncludeKind::kIncludeNext
@@ -591,10 +604,8 @@ void Preprocessor::HandlePragmaDirective(Token& pragma_tok) {
   // #pragma once
   if (tok.GetKind() == TokenKind::kIdentifier &&
       LookUpIdentifierInfo(tok)->GetName() == "once") {
-    if (header_search_ != nullptr) {
-      if (const FileEntry* fe = FileEntryOf(cur_lexer_.get())) {
-        header_search_->MarkFileIncludeOnce(fe);
-      }
+    if (const FileEntry* fe = FileEntryOf(cur_lexer_.get())) {
+      header_search_.MarkFileIncludeOnce(fe);
     }
     DiscardUntilEndOfDirective();
     return;
@@ -681,10 +692,8 @@ void Preprocessor::HandleGCCOrClangPragma(Token& pragma_tok, Token& ns_tok) {
     // file-backed header this is recorded in HeaderSearch so that later
     // lookups, the InclusionDirective callback, and IsInSystemHeader() all see
     // it; GetCurrentFileCharacteristic() reads the same record.
-    if (header_search_ != nullptr) {
-      if (const FileEntry* fe = FileEntryOf(cur_lexer_.get())) {
-        header_search_->MarkFileAsSystemHeader(fe);
-      }
+    if (const FileEntry* fe = FileEntryOf(cur_lexer_.get())) {
+      header_search_.MarkFileAsSystemHeader(fe);
     }
 
     DiscardUntilEndOfDirective();

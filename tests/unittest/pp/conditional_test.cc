@@ -6,6 +6,7 @@
 #include "bcc/basic/file_manager.hh"
 #include "bcc/basic/source_manager.hh"
 #include "bcc/lex/token_kind.hh"
+#include "bcc/pp/header_search.hh"
 #include "bcc/pp/preprocessor.hh"
 #include "gtest/gtest.h"
 
@@ -16,11 +17,12 @@ class ConditionalTest : public ::testing::Test {
  protected:
   FileManager fm_;
   SourceManager sm_{fm_};
+  HeaderSearch hs_{fm_};
   DiagnosticsEngine diags_{nullptr, &sm_};
 
   std::vector<std::string> Run(std::string_view content) {
     sm_.SetMainFileID(sm_.CreateFileID("main.c", std::string(content)));
-    Preprocessor pp(sm_, diags_);
+    Preprocessor pp(sm_, diags_, hs_);
     pp.EnterMainFile();
 
     std::vector<std::string> out;

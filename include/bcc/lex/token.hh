@@ -33,6 +33,16 @@ inline constexpr TokenFlag& operator|=(TokenFlag& lhs, TokenFlag rhs) {
 
 class Token {
  public:
+  /// \brief Constructs an invalid token with no source location, no lexeme, and
+  ///        kUnknown kind.
+  Token() noexcept
+      : data_(nullptr),
+        loc_(),
+        length_(0),
+        ident_(nullptr),
+        kind_(TokenKind::kUnknown),
+        flag_(TokenFlag::kNone) {}
+
   /// \brief Constructs a token with the given properties.
   ///
   /// \param loc    The source location of the first byte of this token's raw
