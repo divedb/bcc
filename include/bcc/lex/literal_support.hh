@@ -12,50 +12,6 @@ namespace bcc {
 
 class DiagnosticsEngine;
 
-/// \brief Decodes the spelling of a numeric-constant token (C11 6.4.4.1/2):
-///        radix, digits, and suffixes. Mirrors Clang's NumericLiteralParser.
-///
-/// The spelling must already be cleaned of escaped newlines.
-class NumericLiteralParser {
- public:
-  NumericLiteralParser(std::string_view spelling, SourceLocation loc,
-                       DiagnosticsEngine& diags);
-
-  bool HadError() const noexcept { return had_error_; }
-  bool IsFloatingLiteral() const noexcept { return is_floating_; }
-  unsigned GetRadix() const noexcept { return radix_; }
-
-  bool IsUnsigned() const noexcept { return is_unsigned_; }
-  bool IsLong() const noexcept { return is_long_; }
-  bool IsLongLong() const noexcept { return is_long_long_; }
-  bool HasFloatSuffix() const noexcept { return is_float_suffix_; }
-
-  /// \brief Evaluates the integer value. Returns true on overflow of uint64.
-  bool GetIntegerValue(uint64_t& value) const;
-
-  /// \brief Evaluates a floating literal's value.
-  double GetFloatValue() const;
-
- private:
-  void ParseNumberStartingWithZero();
-  bool ParseSuffix(std::string_view suffix);
-
-  std::string_view spelling_;
-  SourceLocation loc_;
-  DiagnosticsEngine& diags_;
-
-  std::size_t digits_begin_ = 0;  // offset of first digit
-  std::size_t suffix_begin_ = 0;  // offset just past digits/exponent
-
-  unsigned radix_ = 10;
-  bool is_floating_ = false;
-  bool is_unsigned_ = false;
-  bool is_long_ = false;
-  bool is_long_long_ = false;
-  bool is_float_suffix_ = false;
-  bool had_error_ = false;
-};
-
 /// \brief Decodes a character-constant token, including escape sequences and
 ///        multi-character constants. Mirrors Clang's CharLiteralParser.
 class CharLiteralParser {

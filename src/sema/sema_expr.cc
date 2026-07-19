@@ -1,6 +1,7 @@
 #include <string>
 
 #include "bcc/lex/literal_support.hh"
+#include "bcc/lex/numeric_literal.hh"
 #include "bcc/lex/token.hh"
 #include "bcc/pp/identifier_table.hh"
 #include "bcc/sema/sema.hh"
@@ -54,8 +55,7 @@ ExprResult Sema::DefaultFunctionArrayLvalueConversion(Expr* e) {
                              CastKind::kFunctionToPointerDecay);
   }
   if (t->IsArrayType()) {
-    return ImpCastExprToType(e,
-                             ctx_.GetPointerType(t->GetArrayElementType()),
+    return ImpCastExprToType(e, ctx_.GetPointerType(t->GetArrayElementType()),
                              CastKind::kArrayToPointerDecay);
   }
   if (e->IsLValue()) {
@@ -100,10 +100,14 @@ int FloatRank(QualType t) {
   const auto* bt = t.GetCanonical().GetTypePtr()->As<BuiltinType>();
   if (!bt) return 0;
   switch (bt->GetKind()) {
-    case BuiltinTypeKind::kFloat: return 1;
-    case BuiltinTypeKind::kDouble: return 2;
-    case BuiltinTypeKind::kLongDouble: return 3;
-    default: return 0;
+    case BuiltinTypeKind::kFloat:
+      return 1;
+    case BuiltinTypeKind::kDouble:
+      return 2;
+    case BuiltinTypeKind::kLongDouble:
+      return 3;
+    default:
+      return 0;
   }
 }
 
@@ -240,8 +244,10 @@ Sema::AssignConvertType Sema::CheckSingleAssignmentConstraints(
           ctx_.IsCompatible(lp.WithoutQualifiers(), rp.WithoutQualifiers()) ||
           lp.GetTypePtr()->IsVoidType() || rp.GetTypePtr()->IsVoidType();
       // void* does not mix with function pointers.
-      if ((lp.GetTypePtr()->IsVoidType() && rp.GetTypePtr()->IsFunctionType()) ||
-          (rp.GetTypePtr()->IsVoidType() && lp.GetTypePtr()->IsFunctionType())) {
+      if ((lp.GetTypePtr()->IsVoidType() &&
+           rp.GetTypePtr()->IsFunctionType()) ||
+          (rp.GetTypePtr()->IsVoidType() &&
+           lp.GetTypePtr()->IsFunctionType())) {
         pointees_compatible = false;
       }
       if (pointees_compatible) {
@@ -285,9 +291,9 @@ void Sema::DiagnoseAssignmentResult(AssignConvertType result,
     case AssignConvertType::kCompatible:
       return;
     case AssignConvertType::kPointerInt:
-      Diag(loc,
-           lhs_type->IsPointerType() ? diag::warn_typecheck_convert_int_pointer
-                                     : diag::warn_typecheck_convert_pointer_int)
+      Diag(loc, lhs_type->IsPointerType()
+                    ? diag::warn_typecheck_convert_int_pointer
+                    : diag::warn_typecheck_convert_pointer_int)
           << lhs_type.GetAsString() << rhs_type.GetAsString() << action
           << connector;
       return;
@@ -356,22 +362,42 @@ ExprResult Sema::ActOnIdExpression(Scope* s, const IdentifierInfo* name,
 
 ExprResult Sema::ActOnNumericConstant(const Token& tok) {
   std::string spelling = CleanSpelling(tok);
-  NumericLiteralParser literal(spelling, tok.GetLocation(), diags_);
-  if (literal.HadError()) return ExprError();
+  NumericLiteralParser literal(spelling);
+  if (literal.HadError()) {
+    switch (literal.GetError()) {
+      case NumericLiteralParser::Error::kInvalidSuffix:
+        Diag(tok.GetLocation(), diag::err_invalid_suffix_constant)
+            << spelling
+            << (literal.IsIntegerLiteral() ? "integer" : "floating");
+        break;
+      case NumericLiteralParser::Error::kMissingExponentDigits:
+        Diag(tok.GetLocation(), diag::err_exponent_has_no_digits);
+        break;
+      default:
+        Diag(tok.GetLocation(), diag::err_invalid_digit)
+            << spelling << "numeric";
+        break;
+    }
+    return ExprError();
+  }
 
   if (literal.IsFloatingLiteral()) {
+    auto value = literal.GetFloatValue();
+    if (!value) return ExprError();
+
     QualType type = ctx_.DoubleTy();
-    if (literal.HasFloatSuffix()) type = ctx_.FloatTy();
+    if (value.Value().GetFormat() == fmt::kFloat) type = ctx_.FloatTy();
     if (literal.IsLong()) type = ctx_.LongDoubleTy();
-    return ctx_.New<FloatingLiteral>(literal.GetFloatValue(), type,
+    return ctx_.New<FloatingLiteral>(value.Value().ToDouble(), type,
                                      tok.GetLocation());
   }
 
-  uint64_t value = 0;
-  if (literal.GetIntegerValue(value)) {
+  APSInt parsed_value;
+  if (literal.GetIntegerValue(parsed_value, 64)) {
     Diag(tok.GetLocation(), diag::err_integer_literal_too_large);
     return ExprError();
   }
+  uint64_t value = parsed_value.GetZExtValue();
 
   // C11 6.4.4.1p5: the type is the first in the applicable list that can
   // represent the value.
@@ -420,17 +446,22 @@ ExprResult Sema::ActOnNumericConstant(const Token& tok) {
 
 ExprResult Sema::ActOnCharacterConstant(const Token& tok) {
   std::string spelling = CleanSpelling(tok);
-  CharLiteralParser literal(spelling, tok.GetLocation(), tok.GetKind(),
-                            diags_);
+  CharLiteralParser literal(spelling, tok.GetLocation(), tok.GetKind(), diags_);
   if (literal.HadError()) return ExprError();
 
   QualType type;
   switch (tok.GetKind()) {
-    case TokenKind::kUtf16CharConstant: type = ctx_.Char16Ty(); break;
-    case TokenKind::kUtf32CharConstant: type = ctx_.Char32Ty(); break;
+    case TokenKind::kUtf16CharConstant:
+      type = ctx_.Char16Ty();
+      break;
+    case TokenKind::kUtf32CharConstant:
+      type = ctx_.Char32Ty();
+      break;
     // Plain and wide character constants have type int in C
     // (C11 6.4.4.4p10; wchar_t is int on x86-64).
-    default: type = ctx_.IntTy(); break;
+    default:
+      type = ctx_.IntTy();
+      break;
   }
   return ctx_.New<CharacterLiteral>(literal.GetValue(), type,
                                     tok.GetLocation());
@@ -447,17 +478,24 @@ ExprResult Sema::ActOnStringLiteral(const std::vector<Token>& toks) {
 
   QualType elem;
   switch (literal.GetKind()) {
-    case TokenKind::kUtf16StringLiteral: elem = ctx_.Char16Ty(); break;
-    case TokenKind::kUtf32StringLiteral: elem = ctx_.Char32Ty(); break;
-    case TokenKind::kWideStringLiteral: elem = ctx_.WCharTy(); break;
-    default: elem = ctx_.CharTy(); break;
+    case TokenKind::kUtf16StringLiteral:
+      elem = ctx_.Char16Ty();
+      break;
+    case TokenKind::kUtf32StringLiteral:
+      elem = ctx_.Char32Ty();
+      break;
+    case TokenKind::kWideStringLiteral:
+      elem = ctx_.WCharTy();
+      break;
+    default:
+      elem = ctx_.CharTy();
+      break;
   }
 
   QualType type =
       ctx_.GetStringLiteralArrayType(elem, literal.GetNumElements());
-  return ctx_.New<StringLiteral>(literal.GetBytes(),
-                                 literal.GetCharByteWidth(), type,
-                                 toks.front().GetLocation());
+  return ctx_.New<StringLiteral>(literal.GetBytes(), literal.GetCharByteWidth(),
+                                 type, toks.front().GetLocation());
 }
 
 ExprResult Sema::ActOnParenExpr(SourceLocation lparen, SourceLocation rparen,
@@ -578,8 +616,8 @@ ExprResult Sema::ActOnUnaryOp(SourceLocation op_loc, UnaryOperatorKind op,
     case UnaryOperatorKind::kPreDec:
     case UnaryOperatorKind::kPostInc:
     case UnaryOperatorKind::kPostDec: {
-      bool is_inc = op == UnaryOperatorKind::kPreInc ||
-                    op == UnaryOperatorKind::kPostInc;
+      bool is_inc =
+          op == UnaryOperatorKind::kPreInc || op == UnaryOperatorKind::kPostInc;
       QualType t = CheckIncrementDecrementOperand(operand, op_loc, is_inc);
       if (t.IsNull()) return ExprError();
       return ctx_.New<UnaryOperator>(op, operand, t, ValueKind::kRValue,
@@ -662,9 +700,7 @@ QualType Sema::CheckRemainderOperands(Expr*& lhs, Expr*& rhs,
 /// type. Returns false (diagnosing) otherwise.
 static bool CheckPointerArithmeticOperand(Sema& sema, QualType pointer_type,
                                           SourceLocation loc) {
-  QualType pointee = pointer_type.GetCanonical()
-                         .GetTypePtr()
-                         ->GetPointeeType();
+  QualType pointee = pointer_type.GetCanonical().GetTypePtr()->GetPointeeType();
   if (pointee.GetTypePtr()->IsFunctionType()) {
     sema.Diag(loc, diag::err_typecheck_pointer_arith_function_type)
         << pointee.GetAsString();
@@ -694,8 +730,8 @@ QualType Sema::CheckAdditionOperands(Expr*& lhs, Expr*& rhs,
   }
 
   // pointer + integer (either order).
-  Expr* pointer = lt->IsPointerType() ? lhs : (rt->IsPointerType() ? rhs
-                                                                   : nullptr);
+  Expr* pointer =
+      lt->IsPointerType() ? lhs : (rt->IsPointerType() ? rhs : nullptr);
   Expr* index = pointer == lhs ? rhs : lhs;
   if (pointer && index->GetType()->IsIntegerType()) {
     if (!CheckPointerArithmeticOperand(*this, pointer->GetType(), loc)) {
@@ -745,8 +781,7 @@ QualType Sema::CheckSubtractionOperands(Expr*& lhs, Expr*& rhs,
   return {};
 }
 
-QualType Sema::CheckShiftOperands(Expr*& lhs, Expr*& rhs,
-                                  SourceLocation loc) {
+QualType Sema::CheckShiftOperands(Expr*& lhs, Expr*& rhs, SourceLocation loc) {
   // Shifts promote each operand independently; the result has the promoted
   // LHS type (C11 6.5.7p3).
   ExprResult lc = UsualUnaryConversions(lhs);
@@ -761,8 +796,7 @@ QualType Sema::CheckShiftOperands(Expr*& lhs, Expr*& rhs,
   return lhs->GetType();
 }
 
-QualType Sema::CheckCompareOperands(Expr*& lhs, Expr*& rhs,
-                                    SourceLocation loc,
+QualType Sema::CheckCompareOperands(Expr*& lhs, Expr*& rhs, SourceLocation loc,
                                     BinaryOperatorKind op) {
   bool is_equality =
       op == BinaryOperatorKind::kEQ || op == BinaryOperatorKind::kNE;
@@ -869,8 +903,8 @@ ExprResult Sema::ActOnBinOp(SourceLocation op_loc, BinaryOperatorKind op,
   switch (op) {
     case BinaryOperatorKind::kMul:
     case BinaryOperatorKind::kDiv:
-      result_type = CheckMultiplyDivideOperands(
-          lhs, rhs, op_loc, op == BinaryOperatorKind::kDiv);
+      result_type = CheckMultiplyDivideOperands(lhs, rhs, op_loc,
+                                                op == BinaryOperatorKind::kDiv);
       break;
     case BinaryOperatorKind::kRem:
       result_type = CheckRemainderOperands(lhs, rhs, op_loc);
@@ -960,11 +994,10 @@ ExprResult Sema::ActOnBinOp(SourceLocation op_loc, BinaryOperatorKind op,
           computation_type =
               CommonArithmeticType(ctx_, lhs_value_type, rhs_type);
           // Convert the RHS to the computation type.
-          if (rhs_type.GetCanonical().WithoutQualifiers() !=
-              computation_type) {
-            rhs = ImpCastExprToType(rhs, computation_type,
-                                    GetScalarCastKind(rhs_type,
-                                                      computation_type));
+          if (rhs_type.GetCanonical().WithoutQualifiers() != computation_type) {
+            rhs = ImpCastExprToType(
+                rhs, computation_type,
+                GetScalarCastKind(rhs_type, computation_type));
           }
         }
       } else {
@@ -1027,12 +1060,11 @@ ExprResult Sema::ActOnConditionalOp(SourceLocation question_loc,
 
     if (ctx_.IsCompatible(lp.GetCanonical().WithoutQualifiers(),
                           rp.GetCanonical().WithoutQualifiers())) {
-      QualType composite = ctx_.GetCompositeType(
-          lp.GetCanonical().WithoutQualifiers(),
-          rp.GetCanonical().WithoutQualifiers());
+      QualType composite =
+          ctx_.GetCompositeType(lp.GetCanonical().WithoutQualifiers(),
+                                rp.GetCanonical().WithoutQualifiers());
       result = ctx_.GetPointerType(composite.WithQualifiers(merged));
-    } else if (lp.GetTypePtr()->IsVoidType() ||
-               rp.GetTypePtr()->IsVoidType()) {
+    } else if (lp.GetTypePtr()->IsVoidType() || rp.GetTypePtr()->IsVoidType()) {
       result = ctx_.GetPointerType(ctx_.VoidTy().WithQualifiers(merged));
     } else {
       Diag(question_loc, diag::err_typecheck_cond_incompatible_operands)
@@ -1226,8 +1258,8 @@ ExprResult Sema::ActOnMemberAccess(Expr* base, SourceLocation op_loc,
 
   // Wrap anonymous-member hops in intermediate MemberExprs, then the found
   // field. Member qualifiers merge with the base's (C11 6.5.2.3p3-4).
-  ValueKind vk = is_arrow || base->IsLValue() ? ValueKind::kLValue
-                                              : ValueKind::kRValue;
+  ValueKind vk =
+      is_arrow || base->IsLValue() ? ValueKind::kLValue : ValueKind::kRValue;
   Expr* result = base;
   bool first = true;
   for (const FieldDecl* step : path) {
@@ -1256,8 +1288,7 @@ ExprResult Sema::ActOnCastExpr(SourceLocation lparen, QualType type,
   }
 
   if (!type->IsScalarType()) {
-    Diag(lparen, diag::err_typecheck_cond_expect_scalar)
-        << type.GetAsString();
+    Diag(lparen, diag::err_typecheck_cond_expect_scalar) << type.GetAsString();
     return ExprError();
   }
 
@@ -1324,8 +1355,8 @@ ExprResult Sema::ActOnSizeofAlignof(SourceLocation op_loc, bool is_sizeof,
     return ExprError();
   }
 
-  uint64_t value = is_sizeof ? ctx_.GetTypeSize(query_type)
-                             : ctx_.GetTypeAlign(query_type);
+  uint64_t value =
+      is_sizeof ? ctx_.GetTypeSize(query_type) : ctx_.GetTypeAlign(query_type);
   return ctx_.New<SizeOfAlignOfExpr>(is_sizeof, query_type, operand, value,
                                      ctx_.SizeTy(), range);
 }
@@ -1379,8 +1410,7 @@ ExprResult Sema::ActOnGenericSelection(SourceLocation generic_loc,
   }
   if (!chosen) chosen = default_assoc;
   if (!chosen) {
-    Diag(generic_loc, diag::err_generic_no_match)
-        << control_type.GetAsString();
+    Diag(generic_loc, diag::err_generic_no_match) << control_type.GetAsString();
     return ExprError();
   }
   if (!chosen->expr) return ExprError();

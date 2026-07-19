@@ -105,8 +105,10 @@ bool NumericLiteralParser::ParseDigits(std::size_t& pos) {
     int digit = DigitValue(c);
     if (digit < 0) break;
     if (static_cast<unsigned>(digit) >= radix_) {
-      // e/E begins a decimal exponent and is not an invalid octal digit.
-      if (!(radix_ != 16 && Lower(c) == 'e')) {
+      // A decimal digit outside the radix is always invalid (for example, 8
+      // in an octal literal). An alphabetic hexadecimal digit can instead be
+      // the exponent marker or suffix and is validated by the next stage.
+      if (c >= '0' && c <= '9') {
         SetError(Error::kInvalidDigit);
         return false;
       }

@@ -73,6 +73,13 @@ TEST(NumericLiteralParserTest, ParsesAPFloatValuesAndSuffixSemantics) {
   ASSERT_TRUE(static_cast<bool>(ap_value));
   ASSERT_TRUE(ap_value.Value().IsFloat());
   EXPECT_DOUBLE_EQ(ap_value.Value().GetFloat().ToDouble(), 3.0);
+
+  NumericLiteralParser decimal_float("1.5f");
+  ASSERT_FALSE(decimal_float.HadError());
+  auto single = decimal_float.GetFloatValue();
+  ASSERT_TRUE(static_cast<bool>(single));
+  EXPECT_EQ(single.Value().GetFormat(), fmt::kFloat);
+  EXPECT_DOUBLE_EQ(single.Value().ToDouble(), 1.5);
 }
 
 TEST(NumericLiteralParserTest, RejectsMalformedValues) {

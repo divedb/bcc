@@ -33,6 +33,7 @@ target_link_libraries(bcc_basic
 add_library(bcc_lex
   lex/cursor.cc
   lex/lexer.cc
+  lex/literal_support.cc
   lex/numeric_literal.cc
 )
 

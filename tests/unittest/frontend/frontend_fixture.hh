@@ -11,6 +11,7 @@
 #include "bcc/basic/file_manager.hh"
 #include "bcc/basic/source_manager.hh"
 #include "bcc/parse/parser.hh"
+#include "bcc/pp/header_search.hh"
 #include "bcc/pp/preprocessor.hh"
 #include "bcc/sema/sema.hh"
 #include "gtest/gtest.h"
@@ -44,7 +45,8 @@ class FrontendTest : public ::testing::Test {
     consumer_ = std::make_unique<CollectingDiagConsumer>();
     diags_ = std::make_unique<DiagnosticsEngine>(consumer_.get(), sm_.get());
     sm_->SetMainFileID(sm_->CreateFileID("test.c", std::string(code)));
-    pp_ = std::make_unique<Preprocessor>(*sm_, *diags_);
+    header_search_ = std::make_unique<HeaderSearch>(*fm_);
+    pp_ = std::make_unique<Preprocessor>(*sm_, *diags_, *header_search_);
     pp_->EnterMainFile();
     ctx_ = std::make_unique<ASTContext>();
     sema_ = std::make_unique<Sema>(*pp_, *ctx_);
@@ -93,6 +95,7 @@ class FrontendTest : public ::testing::Test {
   std::unique_ptr<SourceManager> sm_;
   std::unique_ptr<CollectingDiagConsumer> consumer_;
   std::unique_ptr<DiagnosticsEngine> diags_;
+  std::unique_ptr<HeaderSearch> header_search_;
   std::unique_ptr<Preprocessor> pp_;
   std::unique_ptr<ASTContext> ctx_;
   std::unique_ptr<Sema> sema_;
