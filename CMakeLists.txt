@@ -18,6 +18,10 @@ add_executable(pp_dump bin/pp_dump.cc)
 target_link_libraries(pp_dump PRIVATE bcc_pp)
 target_compile_features(pp_dump PUBLIC cxx_std_20)
 
+add_executable(cc_dump bin/cc_dump.cc)
+target_link_libraries(cc_dump PRIVATE bcc_parse bcc_codegen)
+target_compile_features(cc_dump PUBLIC cxx_std_20)
+
 add_executable(diag_demo bin/diag_demo.cc)
 target_link_libraries(diag_demo PRIVATE bcc_basic)
 target_compile_features(diag_demo PUBLIC cxx_std_20)

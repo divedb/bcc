@@ -71,3 +71,19 @@ gtest_discover_tests(bcc_basic_test)
 gtest_discover_tests(bcc_lex_test)
 gtest_discover_tests(bcc_pp_test)
 gtest_discover_tests(bcc_as_test)
+
+add_executable(bcc_frontend_test
+  unittest/frontend/codegen_test.cc
+  unittest/frontend/parser_test.cc
+  unittest/frontend/sema_test.cc
+)
+
+target_link_libraries(bcc_frontend_test
+  PRIVATE
+    bcc_parse
+    bcc_codegen
+    GTest::gtest_main
+)
+
+include(GoogleTest)
+gtest_discover_tests(bcc_frontend_test)
