@@ -3,9 +3,6 @@
 #include <cctype>
 #include <string>
 
-#include "llvm/ADT/APInt.h"
-#include "llvm/ADT/StringRef.h"
-
 namespace bcc {
 namespace {
 
@@ -203,37 +200,53 @@ bool NumericLiteralParser::ParseFloatSuffix(std::size_t pos) {
   return true;
 }
 
-bool NumericLiteralParser::GetIntegerValue(llvm::APSInt& value,
+bool NumericLiteralParser::GetIntegerValue(APSInt& value,
                                            unsigned bit_width) const {
-  llvm::APInt result(bit_width, 0);
-  llvm::APInt radix_value(bit_width, radix_);
+  APInt result(bit_width, 0);
+  APInt radix_value(bit_width, radix_);
   bool overflow = false;
   for (std::size_t pos = digits_begin_; pos < digits_end_; ++pos) {
     if (spelling_[pos] == '\'') continue;
-    llvm::APInt old = result;
+    APInt old = result;
     result *= radix_value;
-    overflow |= result.udiv(radix_value) != old;
-    llvm::APInt digit(bit_width,
-                      static_cast<uint64_t>(DigitValue(spelling_[pos])));
+    overflow |= result.UDiv(radix_value) != old;
+    APInt digit(bit_width, static_cast<uint64_t>(DigitValue(spelling_[pos])));
     result += digit;
-    overflow |= result.ult(digit);
+    overflow |= result.ULt(digit);
   }
-  value = llvm::APSInt(std::move(result), is_unsigned_);
+  value = APSInt(std::move(result), is_unsigned_);
   return overflow;
 }
 
-llvm::Expected<llvm::APFloat::opStatus> NumericLiteralParser::GetFloatValue(
-    llvm::APFloat& value, llvm::RoundingMode rounding) const {
-  const llvm::fltSemantics& semantics = is_float_ ? llvm::APFloat::IEEEsingle()
-                                        : is_long_
-                                            ? llvm::APFloat::x87DoubleExtended()
-                                            : llvm::APFloat::IEEEdouble();
-  value = llvm::APFloat(semantics);
+Expected<APFloat, NumericLiteralParser::Error>
+NumericLiteralParser::GetFloatValue(RoundingMode rounding) const {
+  if (HadError() || IsIntegerLiteral()) {
+    return UnExpected(HadError() ? error_ : Error::kInvalidSuffix);
+  }
   std::string cleaned;
   cleaned.reserve(float_end_);
   for (std::size_t pos = 0; pos < float_end_; ++pos)
     if (spelling_[pos] != '\'') cleaned.push_back(spelling_[pos]);
-  return value.convertFromString(llvm::StringRef(cleaned), rounding);
+  FloatFormat format = is_float_  ? fmt::kFloat
+                       : is_long_ ? fmt::kX87_80
+                                  : fmt::kDouble;
+  return APFloat(format, cleaned, nullptr, rounding);
+}
+
+Expected<APValue, NumericLiteralParser::Error> NumericLiteralParser::GetValue(
+    unsigned integer_bit_width) const {
+  if (HadError()) return UnExpected(error_);
+  if (IsFloatingLiteral()) {
+    auto value = GetFloatValue();
+    if (!value) return UnExpected(value.Error());
+    return APValue(std::move(value).Value());
+  }
+
+  APSInt value;
+  if (GetIntegerValue(value, integer_bit_width)) {
+    return UnExpected(Error::kOverflow);
+  }
+  return APValue(std::move(value));
 }
 
 }  // namespace bcc

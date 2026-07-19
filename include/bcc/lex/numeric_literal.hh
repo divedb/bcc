@@ -2,9 +2,10 @@
 
 #include <string_view>
 
-#include "llvm/ADT/APFloat.h"
-#include "llvm/ADT/APSInt.h"
-#include "llvm/Support/Error.h"
+#include "bcc/support/apfloat.hh"
+#include "bcc/support/apint.hh"
+#include "bcc/support/apvalue.hh"
+#include "bcc/support/expected.hh"
 
 namespace bcc {
 
@@ -21,6 +22,7 @@ class NumericLiteralParser {
     kMissingDigits,
     kMissingExponentDigits,
     kInvalidSeparator,
+    kOverflow,
   };
 
   explicit NumericLiteralParser(std::string_view spelling);
@@ -39,14 +41,16 @@ class NumericLiteralParser {
   /// Converts the digit sequence to an APSInt of the requested width. Returns
   /// true if unsigned magnitude overflow occurred. Signedness initially
   /// reflects the U suffix; callers apply context-specific type selection.
-  bool GetIntegerValue(llvm::APSInt& value, unsigned bit_width) const;
+  bool GetIntegerValue(APSInt& value, unsigned bit_width) const;
 
   /// Converts a floating literal using the semantics selected by its suffix:
   /// f -> IEEE single, no suffix -> IEEE double, l -> x87 extended.
   /// Returns the APFloat conversion status.
-  llvm::Expected<llvm::APFloat::opStatus> GetFloatValue(
-      llvm::APFloat& value, llvm::RoundingMode rounding =
-                                llvm::RoundingMode::NearestTiesToEven) const;
+  Expected<APFloat, Error> GetFloatValue(
+      RoundingMode rounding = RoundingMode::kNearestEven) const;
+
+  /// Parses and converts the literal to the common constant-value container.
+  Expected<APValue, Error> GetValue(unsigned integer_bit_width = 64) const;
 
  private:
   bool ParseDigits(std::size_t& pos);

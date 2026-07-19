@@ -1,8 +1,6 @@
 #include "bcc/lex/numeric_literal.hh"
 
 #include "gtest/gtest.h"
-#include "llvm/ADT/APFloat.h"
-#include "llvm/ADT/APSInt.h"
 
 namespace bcc {
 namespace {
@@ -14,9 +12,14 @@ TEST(NumericLiteralParserTest, ParsesIntegerRadicesIntoAPSInt) {
     NumericLiteralParser literal(spelling);
     ASSERT_FALSE(literal.HadError()) << spelling;
     ASSERT_TRUE(literal.IsIntegerLiteral());
-    llvm::APSInt value;
+    APSInt value;
     EXPECT_FALSE(literal.GetIntegerValue(value, 64));
-    EXPECT_EQ(value.getZExtValue(), expected);
+    EXPECT_EQ(value.GetZExtValue(), expected);
+
+    auto ap_value = literal.GetValue(64);
+    ASSERT_TRUE(static_cast<bool>(ap_value));
+    ASSERT_TRUE(ap_value.Value().IsInt());
+    EXPECT_EQ(ap_value.Value().GetInt().GetZExtValue(), expected);
   }
 }
 
@@ -39,33 +42,37 @@ TEST(NumericLiteralParserTest, RejectsInvalidIntegerSuffixes) {
 TEST(NumericLiteralParserTest, DetectsAPSIntOverflow) {
   NumericLiteralParser literal("0x10000000000000000");
   ASSERT_FALSE(literal.HadError());
-  llvm::APSInt value;
+  APSInt value;
   EXPECT_TRUE(literal.GetIntegerValue(value, 64));
+  auto ap_value = literal.GetValue(64);
+  ASSERT_FALSE(static_cast<bool>(ap_value));
+  EXPECT_EQ(ap_value.Error(), NumericLiteralParser::Error::kOverflow);
 }
 
 TEST(NumericLiteralParserTest, ParsesAPFloatValuesAndSuffixSemantics) {
   NumericLiteralParser literal("0x1.8p+1f");
   ASSERT_FALSE(literal.HadError());
   ASSERT_TRUE(literal.IsFloatingLiteral());
-  llvm::APFloat value(llvm::APFloat::IEEEsingle());
-  auto status = literal.GetFloatValue(value);
-  ASSERT_TRUE(static_cast<bool>(status));
-  EXPECT_EQ(*status, llvm::APFloat::opOK);
-  EXPECT_DOUBLE_EQ(value.convertToDouble(), 3.0);
+  auto value = literal.GetFloatValue();
+  ASSERT_TRUE(static_cast<bool>(value));
+  EXPECT_DOUBLE_EQ(value.Value().ToDouble(), 3.0);
 
   NumericLiteralParser leading_period(".5");
   ASSERT_FALSE(leading_period.HadError());
-  llvm::APFloat half(llvm::APFloat::IEEEdouble());
-  auto half_status = leading_period.GetFloatValue(half);
-  ASSERT_TRUE(static_cast<bool>(half_status));
-  EXPECT_DOUBLE_EQ(half.convertToDouble(), 0.5);
+  auto half = leading_period.GetFloatValue();
+  ASSERT_TRUE(static_cast<bool>(half));
+  EXPECT_DOUBLE_EQ(half.Value().ToDouble(), 0.5);
 
   NumericLiteralParser hex_leading_period("0x.8p1");
   ASSERT_FALSE(hex_leading_period.HadError());
-  llvm::APFloat one(llvm::APFloat::IEEEdouble());
-  auto one_status = hex_leading_period.GetFloatValue(one);
-  ASSERT_TRUE(static_cast<bool>(one_status));
-  EXPECT_DOUBLE_EQ(one.convertToDouble(), 1.0);
+  auto one = hex_leading_period.GetFloatValue();
+  ASSERT_TRUE(static_cast<bool>(one));
+  EXPECT_DOUBLE_EQ(one.Value().ToDouble(), 1.0);
+
+  auto ap_value = literal.GetValue();
+  ASSERT_TRUE(static_cast<bool>(ap_value));
+  ASSERT_TRUE(ap_value.Value().IsFloat());
+  EXPECT_DOUBLE_EQ(ap_value.Value().GetFloat().ToDouble(), 3.0);
 }
 
 TEST(NumericLiteralParserTest, RejectsMalformedValues) {

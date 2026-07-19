@@ -40,15 +40,19 @@ PPValue ParseIntegerConstant(const Token& tok, DiagnosticsEngine& diags,
     return {};
   }
 
-  llvm::APSInt value;
-  if (literal.GetIntegerValue(value, 64)) {
-    diags.Report(tok.GetLocation(), diag::err_pp_integer_constant_too_large);
+  auto parsed = literal.GetValue(64);
+  if (!parsed) {
+    diags.Report(tok.GetLocation(),
+                 parsed.Error() == NumericLiteralParser::Error::kOverflow
+                     ? diag::err_pp_integer_constant_too_large
+                     : diag::err_pp_invalid_integer_constant);
     ok = false;
     return {};
   }
+  const APSInt& value = parsed.Value().GetInt();
 
   bool is_unsigned = literal.IsUnsigned();
-  if (!is_unsigned && value.isNegative()) {
+  if (!is_unsigned && value.IsNegative()) {
     // C permits implicit uintmax_t selection for non-decimal constants. Clang
     // also recovers from an oversized decimal constant as unsigned after
     // diagnosing it; BCC treats diagnostics as fatal, so reject that case.
@@ -59,7 +63,7 @@ PPValue ParseIntegerConstant(const Token& tok, DiagnosticsEngine& diags,
     }
     is_unsigned = true;
   }
-  return {static_cast<int64_t>(value.getZExtValue()), is_unsigned};
+  return {static_cast<int64_t>(value.GetZExtValue()), is_unsigned};
 }
 
 /// Parses a character-constant token into its integer value.

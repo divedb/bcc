@@ -2,10 +2,10 @@
 
 #include <memory>
 
-#include "chibicpp/common/apfloat.hh"
-#include "chibicpp/common/apint.hh"
+#include "bcc/support/apfloat.hh"
+#include "bcc/support/apint.hh"
 
-namespace chibicpp {
+namespace bcc {
 
 class VarDecl;
 class FunctionDecl;
@@ -724,4 +724,4 @@ class APValue {
   }
 };
 
-}  // namespace chibicpp
+}  // namespace bcc

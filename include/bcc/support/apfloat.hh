@@ -5,10 +5,9 @@
 #include <cstdlib>
 #include <cstring>
 
-#include "chibicpp/common/apint.hh"
-#include "chibicpp/common/string_util.hh"
+#include "bcc/support/apint.hh"
 
-namespace chibicpp {
+namespace bcc {
 
 /// \brief Enumeration of supported rounding modes for floating-point
 /// operations.
@@ -1652,7 +1651,10 @@ inline APFloat::APFloat(FloatFormat fmt, std::string_view str, FloatStatus* st,
   }
 
   std::string_view rest = str.substr(pos);
-  std::string restl = chibicpp::AsciiStrToLower(rest);
+  std::string restl(rest);
+  for (char& c : restl) {
+    if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+  }
 
   if (restl == "inf" || restl == "infinity") {
     *this = GetInf(fmt, neg);
@@ -1801,4 +1803,4 @@ inline APFloat::APFloat(FloatFormat fmt, std::string_view str, FloatStatus* st,
   }
 }
 
-}  // namespace chibicpp
+}  // namespace bcc

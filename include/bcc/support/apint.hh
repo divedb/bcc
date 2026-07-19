@@ -16,7 +16,7 @@
 #include <string_view>
 #include <vector>
 
-namespace chibicpp {
+namespace bcc {
 
 class APInt;
 class APSInt;
@@ -1528,4 +1528,4 @@ inline bool operator>=(int64_t v1, const APSInt &v2) { return v2 <= v1; }
 inline bool operator<(int64_t v1, const APSInt &v2) { return v2 > v1; }
 inline bool operator>(int64_t v1, const APSInt &v2) { return v2 < v1; }
 
-}  // namespace chibicpp
+}  // namespace bcc

@@ -5,7 +5,7 @@
 #include <functional>
 #include <type_traits>
 
-namespace chibicpp {
+namespace bcc {
 
 template <typename T, typename E>
 class Expected;
@@ -1596,4 +1596,4 @@ class Expected<T, E> {
 };
 /// @}
 
-}  // namespace chibicpp
+}  // namespace bcc
