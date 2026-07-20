@@ -60,6 +60,21 @@ class Token {
   SourceLocation GetLocation() const noexcept { return loc_; }
   TokenKind GetKind() const noexcept { return kind_; }
 
+  bool IsIdentifier() const noexcept { return kind_ == TokenKind::kIdentifier; }
+
+  /// \brief Checks if the token kind matches any of the specified kinds.
+  ///
+  /// \param kinds The token kinds to check against.
+  /// \return      True if the token kind matches any of the specified
+  ///              kinds; otherwise false.
+  bool IsOneOf(std::initializer_list<TokenKind> kinds) const noexcept {
+    for (TokenKind k : kinds) {
+      if (kind_ == k) return true;
+    }
+
+    return false;
+  }
+
   /// \brief Overwrites the token kind. Used by the preprocessor to promote an
   ///        identifier token to its keyword kind after identifier lookup.
   ///
@@ -84,7 +99,7 @@ class Token {
 
   /// \brief The interned identifier information for this token, or nullptr.
   ///
-  /// Set by the preprocessor (see Preprocessor::LookUpIdentifierInfo) for
+  /// Set by the preprocessor (see Preprocessor::ResolveIdentifier) for
   /// identifier and keyword tokens; nullptr for all other tokens and for any
   /// identifier that has not yet been looked up.
   ///

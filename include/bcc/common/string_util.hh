@@ -19,6 +19,12 @@ constexpr bool IsNewLine(uint32_t cp) noexcept {
 
 constexpr bool IsDigit(uint32_t cp) noexcept { return cp >= '0' && cp <= '9'; }
 
+constexpr int DigitValue(uint32_t cp) noexcept {
+  assert(IsDigit(cp) && "Expected a decimal digit");
+
+  return cp - '0';
+}
+
 constexpr bool IsHexDigit(uint32_t cp) noexcept {
   return (cp >= '0' && cp <= '9') || (cp >= 'a' && cp <= 'f') ||
          (cp >= 'A' && cp <= 'F');

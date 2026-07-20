@@ -116,7 +116,7 @@ class Preprocessor {
   ///        and promoting its kind to the corresponding keyword kind.
   ///
   /// \return The IdentifierInfo for the token's spelling.
-  IdentifierInfo* LookUpIdentifierInfo(Token& tok);
+  IdentifierInfo* ResolveIdentifier(Token& tok);
 
   //===--------------------------------------------------------------------===//
   // Macro state.
@@ -209,7 +209,12 @@ class Preprocessor {
   /// Handles a '#' seen at the start of a line. Reads the directive name and
   /// dispatches; consumes through the end-of-directive token.
   void HandleDirective(Token& hash_tok);
+  /// Dispatches a directive whose first token is an identifier.
+  void HandleNamedDirective(Token& directive);
   void NoteNonGuardDirectiveAtFileScope();
+  /// Reads and validates the unexpanded macro name following #define/#undef.
+  /// On failure, diagnoses the token and consumes the rest of the directive.
+  IdentifierInfo* ReadMacroName(Token& name);
   void HandleDefineDirective(Token& define_tok);
   void HandleUndefDirective(Token& undef_tok);
 
@@ -317,12 +322,19 @@ class Preprocessor {
   /// Handles #line: parses a (macro-expanded) line number and optional filename
   /// and records the override in the SourceManager's line table.
   void HandleLineDirective(Token& line_tok);
+  void HandleLineMarkerDirective(Token& line_number);
+  void HandleLineControlDirective(Token& directive, Token line_number,
+                                  bool expand_tokens);
 
   /// Handles #error (is_error) and #warning by emitting the rest of the line as
   /// a user diagnostic through the DiagnosticsEngine.
   void HandleUserDiagnosticDirective(Token& tok, bool is_error);
-  /// Reads a function-like macro's parameter list, consuming through the ')'.
-  void ReadMacroParameterList(MacroInfo* macro);
+  /// Reads and validates a function-like macro's parameter list.
+  /// Returns false after diagnosing and recovering from malformed input.
+  bool ReadMacroParameterList(MacroInfo* macro);
+  /// Consumes the remainder of the directive unless \p current already ended
+  /// it. Safe to call uniformly from token-validation error paths.
+  void DiscardDirectiveRemainder(const Token& current);
   /// Consumes tokens from the current directive line up to and including kEod.
   void DiscardUntilEndOfDirective();
 

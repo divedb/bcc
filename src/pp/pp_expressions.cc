@@ -571,9 +571,10 @@ bool HasCFeature(std::string_view raw) {
 //===----------------------------------------------------------------------===//
 
 Token Preprocessor::LexDirectiveToken() {
-  Token result{SourceLocation{}, TokenKind::kUnknown, nullptr, 0u};
-  while (!cur_lexer_callback_(*this, result)) {
-  }
+  Token result;
+
+  while (!cur_lexer_callback_(*this, result));
+
   return result;
 }
 
@@ -618,7 +619,7 @@ bool Preprocessor::EvaluateDefinedOperator() {
     return false;
   }
 
-  IdentifierInfo* ii = LookUpIdentifierInfo(tok);
+  IdentifierInfo* ii = ResolveIdentifier(tok);
   bool result = IsMacroDefined(ii);
 
   // Treat the pseudo-macros __has_builtin and __has_attribute as always
@@ -657,7 +658,7 @@ Token Preprocessor::EvaluateHasExpression(Token& tok) {
 
   bool found = false;
   if (arg.GetKind() == TokenKind::kIdentifier) {
-    IdentifierInfo* arg_ii = LookUpIdentifierInfo(arg);
+    IdentifierInfo* arg_ii = ResolveIdentifier(arg);
     std::string_view name = arg_ii->GetName();
     switch (kw) {
       case PPKeyword::kHasBuiltin:
@@ -703,7 +704,7 @@ Token Preprocessor::EvaluateIsIdentifier(Token& tok) {
   bool is_identifier = false;
 
   if (arg.GetKind() == TokenKind::kIdentifier) {
-    IdentifierInfo* arg_ii = LookUpIdentifierInfo(arg);
+    IdentifierInfo* arg_ii = ResolveIdentifier(arg);
     // GNU-extension keywords (active in gnu* modes) are not identifiers.
     std::string_view name = arg_ii->GetName();
     if (name == "typeof" || name == "asm" || name == "__asm" ||

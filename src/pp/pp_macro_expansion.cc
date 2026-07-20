@@ -31,6 +31,7 @@ namespace bcc {
 
 MacroInfo* Preprocessor::AllocateMacroInfo(SourceLocation loc) {
   macro_infos_.push_back(std::make_unique<MacroInfo>(loc));
+
   return macro_infos_.back().get();
 }
 
@@ -64,6 +65,7 @@ MacroInfo* Preprocessor::GetMacroInfo(const IdentifierInfo* ii) const {
   if (ii == nullptr || !ii->HasMacroDefinition()) return nullptr;
 
   auto it = macros_.find(ii);
+
   if (it == macros_.end()) return nullptr;
 
   MacroDirective* md = it->second;
@@ -133,9 +135,11 @@ std::string MakeStringLiteral(std::string_view s) {
 /// a zero-length range.
 SourceLocation ComputeInvocationEnd(SourceManager& sm, const Token& name) {
   SourceLocation start = name.GetLocation();
+
   if (start.IsMacroExpansion()) return start;
 
   auto [fid, offset] = sm.GetDecomposedLoc(start);
+
   return sm.GetLocForOffset(
       fid, offset + static_cast<uint32_t>(name.GetLexeme().size()));
 }
@@ -202,6 +206,7 @@ void Preprocessor::ExpandBuiltinMacro(Token& tok) {
   } else if (ii == ident_timestamp_) {
     kind = TokenKind::kStringLiteral;
     PresumedLoc pl = sm_.GetPresumedLoc(sm_.GetExpansionLoc(tok.GetLocation()));
+
     if (pl.IsValid()) {
       struct stat st;
       std::string fn(pl.filename);
@@ -240,6 +245,7 @@ void Preprocessor::ExpandBuiltinMacro(Token& tok) {
   }
 
   uint32_t length;
+
   if (spelling_loc.IsValid()) {
     FileID fid = sm_.GetFileID(spelling_loc);
     std::string_view cached = sm_.GetBufferData(fid);
@@ -255,6 +261,7 @@ void Preprocessor::ExpandBuiltinMacro(Token& tok) {
   SourceLocation loc = sm_.GetLocForStartOfFile(expansion_fid);
 
   TokenFlag flags = TokenFlag::kNone;
+
   if (tok.IsStartOfLine()) flags |= TokenFlag::kStartOfLine;
   if (tok.HasLeadingSpace()) flags |= TokenFlag::kLeadingSpace;
 
@@ -267,10 +274,12 @@ void Preprocessor::ExpandBuiltinMacro(Token& tok) {
 
 bool Preprocessor::HandleIdentifier(Token& tok) {
   if (tok.GetIdentifierInfo() == nullptr) {
-    LookUpIdentifierInfo(tok);
+    ResolveIdentifier(tok);
   }
+
   // Check for poisoned identifiers before attempting macro expansion.
   IdentifierInfo* ii = tok.GetIdentifierInfo();
+
   if (ii != nullptr && poisoned_identifiers_.count(ii) > 0) {
     diags_.Report(tok.GetLocation(), diag::err_pp_poisoned_macro)
         << ii->GetName();
@@ -291,26 +300,31 @@ bool Preprocessor::HandleIdentifier(Token& tok) {
   // appear (not only inside #if), matching Clang.
   if (ii != nullptr) {
     PPKeyword kw = ii->GetPPKeyword();
+
     if (kw == PPKeyword::kHasBuiltin || kw == PPKeyword::kHasAttribute ||
         kw == PPKeyword::kHasFeature || kw == PPKeyword::kHasExtension ||
         kw == PPKeyword::kIsIdentifier) {
       Token next{SourceLocation{}, TokenKind::kUnknown, nullptr, 0u};
       LexUnexpandedToken(next);
       bool is_call = (next.GetKind() == TokenKind::kLParen);
+
       // Push the peeked token back so the evaluator (or the normal path) sees
       // it. An EOF/Eod sentinel is idempotent and need not be requeued.
       if (next.GetKind() != TokenKind::kEOF &&
           next.GetKind() != TokenKind::kEod) {
         EnterTokenStream(std::vector<Token>{next});
       }
+
       if (is_call) {
         if (kw == PPKeyword::kIsIdentifier) {
           tok = EvaluateIsIdentifier(tok);
         } else {
           tok = EvaluateHasExpression(tok);
         }
+
         return false;  // tok rewritten in place; emit it.
       }
+
       // Not a call: fall through to ordinary handling.
     }
   }
@@ -320,6 +334,7 @@ bool Preprocessor::HandleIdentifier(Token& tok) {
 
 bool Preprocessor::TryExpandMacro(Token& tok) {
   IdentifierInfo* ii = tok.GetIdentifierInfo();
+
   if (ii == nullptr || !ii->HasMacroDefinition()) return false;
 
   if (tok.IsDisableExpand()) return false;
@@ -331,7 +346,9 @@ bool Preprocessor::TryExpandMacro(Token& tok) {
     // Builtins produce a single token computed on the fly; rewrite in place and
     // let the caller emit it directly (no token-lexer, no rescanning).
     if (callbacks_) callbacks_->MacroExpands(tok, macro);
+
     ExpandBuiltinMacro(tok);
+
     return false;
   }
 
@@ -347,14 +364,20 @@ bool Preprocessor::TryExpandMacro(Token& tok) {
 
     MacroArgs args = ReadFunctionLikeMacroArgs(macro);
     macro->SetIsUsed(true);
+
     if (callbacks_) callbacks_->MacroExpands(tok, macro);
+
     EnterMacro(tok, macro, &args);
+
     return true;
   }
 
   macro->SetIsUsed(true);
+
   if (callbacks_) callbacks_->MacroExpands(tok, macro);
+
   EnterMacro(tok, macro, nullptr);
+
   return true;
 }
 
@@ -374,6 +397,7 @@ bool Preprocessor::IsNextTokenLParen() {
   if (tok.GetKind() != TokenKind::kEOF && tok.GetKind() != TokenKind::kEod) {
     EnterTokenStream(std::vector<Token>{tok});
   }
+
   return false;
 }
 
@@ -395,6 +419,7 @@ MacroArgs Preprocessor::ReadFunctionLikeMacroArgs(MacroInfo* macro) {
     LexUnexpandedToken(tok);
 
     TokenKind kind = tok.GetKind();
+
     if (kind == TokenKind::kEOF || kind == TokenKind::kEod) {
       groups.push_back(std::move(current));  // unterminated invocation
       break;
@@ -405,15 +430,18 @@ MacroArgs Preprocessor::ReadFunctionLikeMacroArgs(MacroInfo* macro) {
       current.push_back(tok);
       continue;
     }
+
     if (kind == TokenKind::kRParen) {
       if (paren_depth == 1) {
         groups.push_back(std::move(current));
         break;
       }
+
       --paren_depth;
       current.push_back(tok);
       continue;
     }
+
     if (kind == TokenKind::kComma && paren_depth == 1) {
       // Once the named arguments are collected, commas belong to __VA_ARGS__.
       if (variadic && groups.size() == num_named) {
@@ -422,18 +450,21 @@ MacroArgs Preprocessor::ReadFunctionLikeMacroArgs(MacroInfo* macro) {
         groups.push_back(std::move(current));
         current.clear();
       }
+
       continue;
     }
 
     // Attach IdentifierInfo now so the token can expand during pre-expansion.
     if (kind == TokenKind::kIdentifier && tok.GetIdentifierInfo() == nullptr) {
-      LookUpIdentifierInfo(tok);
+      ResolveIdentifier(tok);
     }
+
     current.push_back(tok);
   }
 
   // Distribute the collected comma-groups across the formal parameters.
   std::vector<std::vector<Token>> args(num_params);
+
   if (num_params == 0) {
     // F(): the single (possibly empty) group is discarded.
   } else if (!variadic) {
@@ -444,6 +475,7 @@ MacroArgs Preprocessor::ReadFunctionLikeMacroArgs(MacroInfo* macro) {
     for (unsigned i = 0; i < num_named && i < groups.size(); ++i) {
       args[i] = std::move(groups[i]);
     }
+
     if (groups.size() > num_named) {
       args[num_params - 1] = std::move(groups[num_named]);
     }
@@ -455,6 +487,7 @@ MacroArgs Preprocessor::ReadFunctionLikeMacroArgs(MacroInfo* macro) {
 std::vector<Token> Preprocessor::ExpandArgument(
     const std::vector<Token>& arg_tokens) {
   std::vector<Token> result;
+
   if (arg_tokens.empty()) return result;
 
   // Append an EOF sentinel that bounds this stream. If the argument's last
@@ -473,7 +506,8 @@ std::vector<Token> Preprocessor::ExpandArgument(
   // Drive the dispatch until the argument stream (and everything it spawned)
   // has been popped back to the depth we started at.
   while (include_macro_stack_.size() > base_depth) {
-    Token tok{SourceLocation{}, TokenKind::kUnknown, nullptr, 0u};
+    Token tok;
+
     if (cur_lexer_callback_(*this, tok)) {
       result.push_back(tok);
     }
@@ -560,21 +594,27 @@ bool TokenLexer::Lex(Token& result) {
   } else if (inherit_leading_space_) {
     tok.SetFlag(TokenFlag::kLeadingSpace);
   }
+
   if (inherit_start_of_line_) {
     tok.SetFlag(TokenFlag::kStartOfLine);
   }
+
   inherit_leading_space_ = false;
   inherit_start_of_line_ = false;
 
   ++cur_token_;
   result = tok;
+
   return true;
 }
 
 int TokenLexer::ParameterIndex(const Token& tok) const {
   if (!macro_->IsFunctionLike()) return -1;
+
   IdentifierInfo* ii = tok.GetIdentifierInfo();
+
   if (ii == nullptr) return -1;
+
   return macro_->GetParameterIndex(ii);
 }
 
@@ -589,6 +629,7 @@ void TokenLexer::BuildExpansion(MacroArgs* args) {
     if (macro_->IsFunctionLike() && cur.GetKind() == TokenKind::kHash &&
         args != nullptr && i + 1 < body.size()) {
       int pidx = ParameterIndex(body[i + 1]);
+
       if (pidx >= 0) {
         Token s = StringifyArgument(args->GetUnexpArgument(pidx));
         // The stringized result inherits the '#' token's whitespace flags so
@@ -596,9 +637,11 @@ void TokenLexer::BuildExpansion(MacroArgs* args) {
         if (cur.HasLeadingSpace()) {
           s.SetFlag(TokenFlag::kLeadingSpace);
         }
+
         AppendOrPaste(owned_tokens_, std::vector<Token>{s}, pending_paste);
         pending_paste = false;
         ++i;  // consume the parameter
+
         continue;
       }
     }
@@ -645,13 +688,16 @@ void TokenLexer::BuildExpansion(MacroArgs* args) {
         std::vector<Token> va_content;
         std::size_t j = i + 2;  // skip __VA_OPT__ and '('
         int depth = 1;
+
         while (j < body.size() && depth > 0) {
           if (body[j].GetKind() == TokenKind::kLParen) {
             ++depth;
           } else if (body[j].GetKind() == TokenKind::kRParen) {
             --depth;
+
             if (depth == 0) break;  // closing paren of __VA_OPT__
           }
+
           va_content.push_back(body[j]);
           ++j;
         }
@@ -663,12 +709,16 @@ void TokenLexer::BuildExpansion(MacroArgs* args) {
         if (va_nonempty) {
           // Process content with parameter substitution.
           std::vector<Token> produced;
+
           for (const Token& ct : va_content) {
             int cpidx = ParameterIndex(ct);
+
             if (cpidx >= 0) {
               const auto& arg_tokens = args->GetUnexpArgument(cpidx);
+
               for (std::size_t k = 0; k < arg_tokens.size(); ++k) {
                 Token t = arg_tokens[k];
+
                 if (k == 0) {
                   if (ct.IsStartOfLine())
                     t.SetFlag(TokenFlag::kStartOfLine);
@@ -679,6 +729,7 @@ void TokenLexer::BuildExpansion(MacroArgs* args) {
                   else
                     t.ClearFlag(TokenFlag::kLeadingSpace);
                 }
+
                 produced.push_back(std::move(t));
               }
             } else {
@@ -781,6 +832,7 @@ void TokenLexer::AppendOrPaste(std::vector<Token>& out,
 
   // Placemarkers: an empty operand leaves the other side unchanged.
   if (produced.empty()) return;
+
   if (out.empty()) {
     out.insert(out.end(), produced.begin(), produced.end());
     return;
@@ -793,6 +845,7 @@ void TokenLexer::AppendOrPaste(std::vector<Token>& out,
     // Invalid paste: keep both tokens side by side.
     out.push_back(produced.front());
   }
+
   for (std::size_t k = 1; k < produced.size(); ++k) {
     out.push_back(produced[k]);
   }
@@ -820,7 +873,7 @@ std::optional<Token> TokenLexer::PasteTokens(const Token& lhs,
   }
 
   if (first.GetKind() == TokenKind::kIdentifier) {
-    pp_.LookUpIdentifierInfo(first);
+    pp_.ResolveIdentifier(first);
   }
 
   // Preserve leading-spacing and start-of-line flags from the LHS token so that
@@ -839,6 +892,7 @@ std::optional<Token> TokenLexer::PasteTokens(const Token& lhs,
 
 Token TokenLexer::StringifyArgument(const std::vector<Token>& arg_tokens) {
   std::string text = "\"";
+
   for (std::size_t i = 0; i < arg_tokens.size(); ++i) {
     const Token& t = arg_tokens[i];
 
@@ -860,10 +914,12 @@ Token TokenLexer::StringifyArgument(const std::vector<Token>& arg_tokens) {
       text += lex;
     }
   }
+
   text += "\"";
 
   const char* data = nullptr;
   SourceLocation loc = pp_.GetScratchBuffer().GetToken(text, data);
+
   return Token(loc, TokenKind::kStringLiteral, data,
                static_cast<uint32_t>(text.size()));
 }

@@ -1,5 +1,6 @@
 #include <cctype>
 #include <cstdio>
+#include <numeric>
 #include <string>
 #include <string_view>
 
@@ -137,101 +138,118 @@ void Preprocessor::HandleDirective(Token& /*hash_tok*/) {
   // The rest of the line is a directive: turn its terminating newline into
   // kEod.
   cur_lexer_->SetParsingPreprocessorDirective(true);
-
   Token directive = cur_lexer_->Lex();
 
-  // A '#' alone on a line (null directive).
-  if (directive.GetKind() == TokenKind::kEod ||
-      directive.GetKind() == TokenKind::kEOF) {
-    return;
+  switch (directive.GetKind()) {
+    case TokenKind::kEod:
+    case TokenKind::kEOF:
+      return;  // A '#' alone on a line is a null directive.
+    case TokenKind::kNumericConstant:
+      HandleLineMarkerDirective(directive);
+      return;
+    case TokenKind::kIdentifier:
+      HandleNamedDirective(directive);
+      return;
+    default:
+      diags_.Report(directive.GetLocation(), diag::err_pp_invalid_directive);
+      NoteNonGuardDirectiveAtFileScope();
+      DiscardUntilEndOfDirective();
+      return;
   }
+}
 
-  if (directive.GetKind() != TokenKind::kIdentifier) {
-    // e.g. a GNU line marker like '# 12 "file"'; unsupported here.
-    DiscardUntilEndOfDirective();
-    return;
-  }
-
-  IdentifierInfo* ii = LookUpIdentifierInfo(directive);
+void Preprocessor::HandleNamedDirective(Token& directive) {
+  IdentifierInfo* ii = ResolveIdentifier(directive);
 
   switch (ii->GetPPKeyword()) {
     case PPKeyword::kDefine:
       HandleDefineDirective(directive);
-      break;
+      return;
     case PPKeyword::kUndef:
       HandleUndefDirective(directive);
-      break;
+      return;
     case PPKeyword::kIf:
       HandleIfDirective(directive);
-      break;
+      return;
     case PPKeyword::kIfdef:
       HandleIfdefDirective(directive, /*is_ifndef=*/false);
-      break;
+      return;
     case PPKeyword::kIfndef:
       HandleIfdefDirective(directive, /*is_ifndef=*/true);
-      break;
+      return;
     case PPKeyword::kElif:
     case PPKeyword::kElifdef:
     case PPKeyword::kElifndef:
       HandleElifFamilyDirective(directive, ii->GetPPKeyword());
-      break;
+      return;
     case PPKeyword::kElse:
       HandleElseDirective(directive);
-      break;
+      return;
     case PPKeyword::kEndif:
       HandleEndifDirective(directive);
-      break;
+      return;
     case PPKeyword::kInclude:
       HandleIncludeDirective(directive);
-      break;
+      return;
     case PPKeyword::kIncludeNext:
       HandleIncludeNextDirective(directive);
-      break;
+      return;
     case PPKeyword::kImport:
       HandleImportDirective(directive);
-      break;
+      return;
     case PPKeyword::kIncludeMacros:
       HandleIncludeMacrosDirective(directive);
-      break;
+      return;
     case PPKeyword::kPragma:
       HandlePragmaDirective(directive);
-      break;
+      return;
     case PPKeyword::kIdent:
     case PPKeyword::kSccs:
       HandleIdentDirective(directive);
-      break;
+      return;
     case PPKeyword::kLine:
       HandleLineDirective(directive);
-      break;
+      return;
     case PPKeyword::kError:
       HandleUserDiagnosticDirective(directive, /*is_error=*/true);
-      break;
+      return;
     case PPKeyword::kWarning:
       HandleUserDiagnosticDirective(directive, /*is_error=*/false);
-      break;
+      return;
     default:
       // A directive at file scope that we don't model still breaks the include
       // guard shape.
       NoteNonGuardDirectiveAtFileScope();
       DiscardUntilEndOfDirective();
-      break;
+      return;
   }
 }
 
-void Preprocessor::HandleDefineDirective(Token& /*define_tok*/) {
-  Token name = cur_lexer_->Lex();
+IdentifierInfo* Preprocessor::ReadMacroName(Token& name) {
+  name = cur_lexer_->Lex();
 
-  if (name.GetKind() != TokenKind::kIdentifier) {
-    // Missing or invalid macro name. Consume the rest of the line unless we
-    // are already sitting on its end.
-    if (name.GetKind() != TokenKind::kEod &&
-        name.GetKind() != TokenKind::kEOF) {
-      DiscardUntilEndOfDirective();
-    }
-    return;
+  if (name.IsOneOf({TokenKind::kEod, TokenKind::kEOF})) {
+    diags_.Report(name.GetLocation(), diag::err_pp_expected_macro_name);
+    DiscardDirectiveRemainder(name);
+
+    return nullptr;
   }
 
-  IdentifierInfo* ii = LookUpIdentifierInfo(name);
+  if (!name.IsIdentifier()) {
+    diags_.Report(name.GetLocation(), diag::err_pp_macro_not_identifier);
+    DiscardDirectiveRemainder(name);
+
+    return nullptr;
+  }
+
+  return ResolveIdentifier(name);
+}
+
+void Preprocessor::HandleDefineDirective(Token& /*define_tok*/) {
+  Token name;
+  IdentifierInfo* ii = ReadMacroName(name);
+
+  if (ii == nullptr) return;
 
   // Include-guard tracking: a `#define GUARD` right after the guard's `#ifndef`
   // (nested inside it) completes the guard; a #define at file scope breaks it.
@@ -242,13 +260,14 @@ void Preprocessor::HandleDefineDirective(Token& /*define_tok*/) {
   }
 
   MacroInfo* macro = AllocateMacroInfo(name.GetLocation());
-
   Token tok = cur_lexer_->Lex();  // the token immediately after the name
 
   // A '(' with no intervening whitespace makes this a function-like macro.
   if (tok.GetKind() == TokenKind::kLParen && !tok.HasLeadingSpace()) {
     macro->SetIsFunctionLike();
-    ReadMacroParameterList(macro);
+
+    if (!ReadMacroParameterList(macro)) return;
+
     tok = cur_lexer_->Lex();  // first replacement token
   }
 
@@ -256,84 +275,130 @@ void Preprocessor::HandleDefineDirective(Token& /*define_tok*/) {
   SourceLocation end_loc = name.GetLocation();
   bool first = true;
   bool has_paste = false;
-  while (tok.GetKind() != TokenKind::kEod && tok.GetKind() != TokenKind::kEOF) {
+
+  while (!tok.IsOneOf({TokenKind::kEod, TokenKind::kEOF})) {
     // Attach IdentifierInfo now so the token can be re-expanded during
     // rescanning (and parameter references resolved) without another lookup.
-    if (tok.GetKind() == TokenKind::kIdentifier) {
-      LookUpIdentifierInfo(tok);
-    }
+    if (tok.IsIdentifier()) ResolveIdentifier(tok);
+
     if (tok.GetKind() == TokenKind::kHashHash) {
       has_paste = true;
     }
+
     if (first) {
       // The first replacement token carries no leading spacing of its own.
       tok.ClearFlag(TokenFlag::kStartOfLine);
       tok.ClearFlag(TokenFlag::kLeadingSpace);
       first = false;
     }
+
     end_loc = tok.GetLocation();
     macro->AddReplacementToken(tok);
     tok = cur_lexer_->Lex();
   }
+
   macro->SetHasPasteOperator(has_paste);
   macro->SetDefinitionEndLoc(end_loc);
-
   AppendDefMacroDirective(ii, macro, name.GetLocation());
 }
 
-void Preprocessor::ReadMacroParameterList(MacroInfo* macro) {
+bool Preprocessor::ReadMacroParameterList(MacroInfo* macro) {
   Token tok = cur_lexer_->Lex();
-  if (tok.GetKind() == TokenKind::kRParen) return;  // F()
+
+  if (tok.GetKind() == TokenKind::kRParen) return true;  // F()
 
   for (;;) {
+    if (tok.IsOneOf({TokenKind::kEod, TokenKind::kEOF})) {
+      diags_.Report(tok.GetLocation(),
+                    diag::err_pp_missing_rparen_in_macro_def);
+      DiscardDirectiveRemainder(tok);
+
+      return false;
+    }
+
     if (tok.GetKind() == TokenKind::kEllipsis) {
       // C99 variadic: `...` is captured as the __VA_ARGS__ parameter.
       macro->SetIsVariadic(true);
       macro->AddParameter(&GetIdentifierTable().Get("__VA_ARGS__"));
-      tok = cur_lexer_->Lex();  // expected ')'
-      break;
+      Token close = cur_lexer_->Lex();
+
+      if (close.GetKind() == TokenKind::kRParen) return true;
+
+      diags_.Report(close.GetLocation(),
+                    diag::err_pp_missing_rparen_in_macro_def);
+      DiscardDirectiveRemainder(close);
+
+      return false;
     }
 
-    if (tok.GetKind() != TokenKind::kIdentifier) break;  // malformed list
+    if (!tok.IsIdentifier()) {
+      diags_.Report(tok.GetLocation(), diag::err_pp_expected_ident_in_arg_list);
+      DiscardDirectiveRemainder(tok);
 
-    IdentifierInfo* param_ii = LookUpIdentifierInfo(tok);
+      return false;
+    }
+
+    IdentifierInfo* param_ii = ResolveIdentifier(tok);
+
+    if (macro->GetParameterIndex(param_ii) >= 0) {
+      diags_.Report(tok.GetLocation(), diag::err_pp_duplicate_name_in_arg_list)
+          << param_ii->GetName();
+      DiscardDirectiveRemainder(tok);
+
+      return false;
+    }
 
     tok = cur_lexer_->Lex();
+
     if (tok.GetKind() == TokenKind::kEllipsis) {
       // GNU named-variadic: `name...` — the identifier is the last named
       // parameter; everything beyond it falls into the trailing variadic slot.
       macro->SetIsVariadic(true);
       macro->AddParameter(param_ii);
-      tok = cur_lexer_->Lex();  // expected ')'
-      break;
+      Token close = cur_lexer_->Lex();
+
+      if (close.GetKind() == TokenKind::kRParen) return true;
+
+      diags_.Report(close.GetLocation(),
+                    diag::err_pp_missing_rparen_in_macro_def);
+      DiscardDirectiveRemainder(close);
+
+      return false;
     }
 
     macro->AddParameter(param_ii);
+
+    if (tok.GetKind() == TokenKind::kRParen) return true;
 
     if (tok.GetKind() == TokenKind::kComma) {
       tok = cur_lexer_->Lex();
       continue;
     }
-    break;  // expected ')'
+
+    if (tok.IsOneOf({TokenKind::kEod, TokenKind::kEOF})) {
+      diags_.Report(tok.GetLocation(),
+                    diag::err_pp_missing_rparen_in_macro_def);
+      DiscardDirectiveRemainder(tok);
+
+      return false;
+    }
+
+    diags_.Report(tok.GetLocation(), diag::err_pp_expected_comma_in_arg_list);
+    DiscardDirectiveRemainder(tok);
+
+    return false;
   }
-  // On a well-formed list `tok` is now the ')', already consumed.
+
+  __builtin_unreachable();
 }
 
 void Preprocessor::HandleUndefDirective(Token& /*undef_tok*/) {
-  Token name = cur_lexer_->Lex();
+  Token name;
+  IdentifierInfo* ii = ReadMacroName(name);
 
-  if (name.GetKind() != TokenKind::kIdentifier) {
-    if (name.GetKind() != TokenKind::kEod &&
-        name.GetKind() != TokenKind::kEOF) {
-      DiscardUntilEndOfDirective();
-    }
-    return;
-  }
-
-  IdentifierInfo* ii = LookUpIdentifierInfo(name);
+  if (ii == nullptr) return;
 
   NoteNonGuardDirectiveAtFileScope();
-
   DiscardUntilEndOfDirective();  // consume any trailing tokens + kEod
   AppendUndefMacroDirective(ii, name.GetLocation());
 }
@@ -341,8 +406,14 @@ void Preprocessor::HandleUndefDirective(Token& /*undef_tok*/) {
 void Preprocessor::DiscardUntilEndOfDirective() {
   Token tok = cur_lexer_->Lex();
 
-  while (tok.GetKind() != TokenKind::kEod && tok.GetKind() != TokenKind::kEOF) {
+  while (!tok.IsOneOf({TokenKind::kEod, TokenKind::kEOF})) {
     tok = cur_lexer_->Lex();
+  }
+}
+
+void Preprocessor::DiscardDirectiveRemainder(const Token& current) {
+  if (!current.IsOneOf({TokenKind::kEod, TokenKind::kEOF})) {
+    DiscardUntilEndOfDirective();
   }
 }
 
@@ -412,7 +483,7 @@ std::optional<Preprocessor::HeaderName> Preprocessor::ParseHeaderName() {
     for (Token& t : toks) {
       if (t.GetKind() == TokenKind::kIdentifier &&
           t.GetIdentifierInfo() == nullptr) {
-        LookUpIdentifierInfo(t);
+        ResolveIdentifier(t);
       }
     }
 
@@ -440,21 +511,25 @@ const FileEntry* Preprocessor::LookupHeader(const HeaderName& header,
     return header_search_.LookupFileNext(header.filename, header.is_angled,
                                          GetCurrentFileDir());
   }
+
   return header_search_.LookupFile(header.filename, header.is_angled,
                                    GetCurrentFileDir());
 }
 
-auto Preprocessor::DecideHeaderEntry(
-    const FileEntry* file, IncludeKind kind) const -> HeaderEntryDecision {
+auto Preprocessor::DecideHeaderEntry(const FileEntry* file,
+                                     IncludeKind kind) const
+    -> HeaderEntryDecision {
   const HeaderFileInfo* info = header_search_.GetExistingFileInfo(file);
 
   if (info != nullptr) {
     if (kind == IncludeKind::kImport && info->is_imported) {
       return HeaderEntryDecision::kSkipAlreadyImported;
     }
+
     if (info->is_pragma_once) {
       return HeaderEntryDecision::kSkipPragmaOnce;
     }
+
     if (info->controlling_macro != nullptr &&
         IsMacroDefined(info->controlling_macro)) {
       return HeaderEntryDecision::kSkipControllingMacro;
@@ -492,6 +567,7 @@ bool Preprocessor::HandleIncludeCommon(Token& include_tok, IncludeKind kind) {
   if (!header) return false;
 
   const FileEntry* file = LookupHeader(*header, kind);
+
   if (callbacks_) {
     CharacteristicKind file_type =
         file != nullptr ? header_search_.GetFileCharacteristic(file)
@@ -603,7 +679,7 @@ void Preprocessor::HandlePragmaDirective(Token& pragma_tok) {
 
   // #pragma once
   if (tok.GetKind() == TokenKind::kIdentifier &&
-      LookUpIdentifierInfo(tok)->GetName() == "once") {
+      ResolveIdentifier(tok)->GetName() == "once") {
     if (const FileEntry* fe = FileEntryOf(cur_lexer_.get())) {
       header_search_.MarkFileIncludeOnce(fe);
     }
@@ -613,7 +689,7 @@ void Preprocessor::HandlePragmaDirective(Token& pragma_tok) {
 
   // Editor-only / no-op pragmas that Clang consumes entirely (no -E output).
   if (tok.GetKind() == TokenKind::kIdentifier) {
-    std::string_view ns = LookUpIdentifierInfo(tok)->GetName();
+    std::string_view ns = ResolveIdentifier(tok)->GetName();
 
     if (ns == "mark" || ns == "region" || ns == "endregion") {
       DiscardUntilEndOfDirective();
@@ -658,6 +734,7 @@ void Preprocessor::HandlePragmaDirective(Token& pragma_tok) {
 
     out.push_back(pragma_tok);
     out.push_back(tok);
+
     for (;;) {
       Token next = cur_lexer_->Lex();
       if (next.GetKind() == TokenKind::kEod ||
@@ -678,7 +755,7 @@ void Preprocessor::HandleGCCOrClangPragma(Token& pragma_tok, Token& ns_tok) {
     return;
   }
 
-  std::string_view sub_name = LookUpIdentifierInfo(sub)->GetName();
+  std::string_view sub_name = ResolveIdentifier(sub)->GetName();
 
   // #pragma GCC poison / #pragma clang poison
   if (sub_name == "poison") {
@@ -718,7 +795,7 @@ void Preprocessor::HandleGCCOrClangPragma(Token& pragma_tok, Token& ns_tok) {
     SourceLocation pragma_loc = scratch_.GetToken("pragma", pragma_data);
     Token pragma_t(pragma_loc, TokenKind::kIdentifier, pragma_data, 6u,
                    TokenFlag::kNone);
-    LookUpIdentifierInfo(pragma_t);
+    ResolveIdentifier(pragma_t);
     out.push_back(pragma_t);
     ns_tok.SetFlag(TokenFlag::kLeadingSpace);
     out.push_back(ns_tok);
@@ -809,7 +886,7 @@ void Preprocessor::HandlePragmaMessageLike(const Token& pragma_tok,
   SourceLocation pragma_loc = scratch_.GetToken("pragma", pragma_data);
   Token pragma_t(pragma_loc, TokenKind::kIdentifier, pragma_data, 6u,
                  TokenFlag::kNone);
-  LookUpIdentifierInfo(pragma_t);
+  ResolveIdentifier(pragma_t);
   out.push_back(pragma_t);
 
   if (is_gcc) {
@@ -817,7 +894,7 @@ void Preprocessor::HandlePragmaMessageLike(const Token& pragma_tok,
     SourceLocation gcc_loc = scratch_.GetToken("GCC", gcc_data);
     Token gcc_t(gcc_loc, TokenKind::kIdentifier, gcc_data, 3u,
                 TokenFlag::kLeadingSpace);
-    LookUpIdentifierInfo(gcc_t);
+    ResolveIdentifier(gcc_t);
     out.push_back(gcc_t);
   }
 
@@ -825,7 +902,7 @@ void Preprocessor::HandlePragmaMessageLike(const Token& pragma_tok,
   SourceLocation kind_loc = scratch_.GetToken(kind, kind_data);
   Token kind_t(kind_loc, TokenKind::kIdentifier, kind_data,
                static_cast<uint32_t>(kind.size()), TokenFlag::kLeadingSpace);
-  LookUpIdentifierInfo(kind_t);
+  ResolveIdentifier(kind_t);
   out.push_back(kind_t);
 
   const char* str_data = nullptr;
@@ -938,7 +1015,7 @@ void Preprocessor::HandlePragmaPoison(Token& /*pragma_tok*/) {
       return;
     }
 
-    IdentifierInfo* ii = LookUpIdentifierInfo(tok);
+    IdentifierInfo* ii = ResolveIdentifier(tok);
 
     // Warn if the identifier is currently defined as a macro.
     if (ii->HasMacroDefinition()) {
@@ -990,7 +1067,7 @@ void Preprocessor::HandlePragmaDiagnostic() {
     return;
   }
 
-  std::string_view cmd_name = LookUpIdentifierInfo(cmd)->GetName();
+  std::string_view cmd_name = ResolveIdentifier(cmd)->GetName();
 
   if (cmd_name == "push") {
     DiscardUntilEndOfDirective();
@@ -1135,15 +1212,28 @@ namespace {
 
 /// Parses a plain decimal digit sequence into \p out. Returns false if \p s is
 /// empty, contains a non-digit, or overflows the permitted #line range.
+///
+/// #line 0x20   // Numeric integer, but invalid #line syntax
+/// #line 077    // Must mean decimal 77, not octal 63
+/// #line 10U    // Integer suffix is not allowed
+/// #line 1'000  // Separators should not be accepted here
 bool ParseLineNumber(std::string_view s, unsigned& out) {
   if (s.empty()) return false;
+
+  const int base = 10;
   unsigned long value = 0;
+
   for (char c : s) {
-    if (c < '0' || c > '9') return false;
-    value = value * 10 + static_cast<unsigned>(c - '0');
-    if (value > 2147483647UL) return false;  // C17 6.10.4 upper bound
+    if (!IsDigit(c)) return false;
+
+    value = value * base + DigitValue(c);
+
+    if (value > std::numeric_limits<unsigned>::max())
+      return false;  // C17 6.10.4 upper bound
   }
+
   out = static_cast<unsigned>(value);
+
   return true;
 }
 
@@ -1166,26 +1256,47 @@ std::string DecodeStringLiteral(std::string_view lexeme) {
 
 void Preprocessor::HandleLineDirective(Token& line_tok) {
   NoteNonGuardDirectiveAtFileScope();
+  Token line_number = LexDirectiveToken();
+  HandleLineControlDirective(line_tok, line_number,
+                             /*expand_tokens=*/true);
+}
 
-  // The line number (and optional filename) are macro-expanded (C17 6.10.4).
-  Token num = LexDirectiveToken();
+void Preprocessor::HandleLineMarkerDirective(Token& line_number) {
+  NoteNonGuardDirectiveAtFileScope();
+  HandleLineControlDirective(line_number, line_number,
+                             /*expand_tokens=*/false);
+}
+
+void Preprocessor::HandleLineControlDirective(Token& directive,
+                                              Token line_number,
+                                              bool expand_tokens) {
+  auto lex_token = [&] {
+    return expand_tokens ? LexDirectiveToken() : cur_lexer_->Lex();
+  };
+
   unsigned line_no = 0;
-  if (num.GetKind() != TokenKind::kNumericConstant ||
-      !ParseLineNumber(num.GetLexeme(), line_no)) {
-    diags_.Report(num.GetLocation(), diag::err_pp_line_requires_integer);
-    if (num.GetKind() != TokenKind::kEod && num.GetKind() != TokenKind::kEOF) {
+
+  if (line_number.GetKind() != TokenKind::kNumericConstant ||
+      !ParseLineNumber(line_number.GetLexeme(), line_no)) {
+    diags_.Report(line_number.GetLocation(),
+                  diag::err_pp_line_requires_integer);
+
+    if (line_number.GetKind() != TokenKind::kEod &&
+        line_number.GetKind() != TokenKind::kEOF) {
       DiscardUntilEndOfDirective();
     }
+
     return;
   }
 
-  Token next = LexDirectiveToken();
+  Token next = lex_token();
   std::string filename;
   bool have_filename = false;
+
   if (next.GetKind() == TokenKind::kStringLiteral) {
     filename = DecodeStringLiteral(next.GetLexeme());
     have_filename = true;
-    next = LexDirectiveToken();
+    next = lex_token();
   } else if (next.GetKind() != TokenKind::kEod &&
              next.GetKind() != TokenKind::kEOF) {
     // A non-string, non-terminator token where the filename belongs is invalid.
@@ -1202,7 +1313,7 @@ void Preprocessor::HandleLineDirective(Token& line_tok) {
   // Anchor the override on the directive's own line (always a file location),
   // not the number token, which may have come from a macro or scratch buffer.
   sm_.AddLineDirective(
-      line_tok.GetLocation(), line_no,
+      directive.GetLocation(), line_no,
       have_filename ? std::string_view{filename} : std::string_view{});
 }
 
@@ -1244,7 +1355,7 @@ bool Preprocessor::CheckIsMacroDefinedOperand(IdentifierInfo** out_name) {
     return false;
   }
 
-  IdentifierInfo* ii = LookUpIdentifierInfo(name);
+  IdentifierInfo* ii = ResolveIdentifier(name);
   if (out_name) *out_name = ii;
   bool defined = IsMacroDefined(ii);
   DiscardUntilEndOfDirective();
@@ -1382,7 +1493,7 @@ void Preprocessor::SkipExcludedConditionalBlock() {
       continue;
     }
 
-    PPKeyword kw = LookUpIdentifierInfo(dir)->GetPPKeyword();
+    PPKeyword kw = ResolveIdentifier(dir)->GetPPKeyword();
 
     if (kw == PPKeyword::kIf || kw == PPKeyword::kIfdef ||
         kw == PPKeyword::kIfndef) {

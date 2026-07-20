@@ -314,6 +314,7 @@ void SourceManager::AddLineDirective(SourceLocation directive_loc,
                                      unsigned line_num,
                                      std::string_view filename) {
   auto [fid, offset] = GetDecomposedLoc(directive_loc);
+
   if (!fid.IsValid()) return;
 
   // The override takes effect on the line following the directive, so anchor
@@ -321,12 +322,15 @@ void SourceManager::AddLineDirective(SourceLocation directive_loc,
   // then equals the presumed line_num, and later lines count up naturally.
   std::string_view buf = GetBufferData(fid);
   uint32_t entry_offset = offset;
+
   while (entry_offset < buf.size() && buf[entry_offset] != '\n') ++entry_offset;
+
   if (entry_offset < buf.size()) ++entry_offset;  // step past the newline
 
-  int filename_id = filename.empty()
-                        ? -1
-                        : line_table_.GetOrCreateFilenameID(std::string(filename));
+  int filename_id =
+      filename.empty()
+          ? -1
+          : line_table_.GetOrCreateFilenameID(std::string(filename));
   line_table_.AddEntry(fid, LineEntry{entry_offset, line_num, filename_id});
 }
 

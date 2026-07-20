@@ -346,7 +346,7 @@ bool Preprocessor::HandleEndOfFile(const Token& eof_tok, Token& result) {
   return true;
 }
 
-IdentifierInfo* Preprocessor::LookUpIdentifierInfo(Token& tok) {
+IdentifierInfo* Preprocessor::ResolveIdentifier(Token& tok) {
   IdentifierInfo* info;
 
   if (tok.NeedsCleaning()) [[unlikely]] {

@@ -116,6 +116,16 @@ TEST_F(DirectiveTest, LineDirectiveRejectsNonInteger) {
   EXPECT_EQ(diags_.NumErrors(), 1u);
 }
 
+TEST_F(DirectiveTest, GnuLineMarkerOverridesLineAndFilename) {
+  EXPECT_EQ(Spellings("# 42 \"generated.c\"\n__FILE__ __LINE__\n"),
+            (V{"\"generated.c\"", "42"}));
+}
+
+TEST_F(DirectiveTest, InvalidNonIdentifierDirectiveIsDiagnosed) {
+  EXPECT_EQ(Spellings("# + invalid\nok\n"), (V{"ok"}));
+  EXPECT_EQ(diags_.NumErrors(), 1u);
+}
+
 //===----------------------------------------------------------------------===//
 // #error / #warning
 //===----------------------------------------------------------------------===//
@@ -134,6 +144,33 @@ TEST_F(DirectiveTest, WarningDirectiveReportsWarningNotError) {
 TEST_F(DirectiveTest, ErrorInSkippedBranchIsInert) {
   EXPECT_EQ(Spellings("#if 0\n#error nope\n#endif\nok\n"), (V{"ok"}));
   EXPECT_EQ(diags_.NumErrors(), 0u);
+}
+
+TEST_F(DirectiveTest, InvalidMacroNamesAreDiagnosedAndRecovered) {
+  EXPECT_EQ(Spellings("#define\n"
+                      "#define 123 replacement\n"
+                      "#undef\n"
+                      "#undef + replacement\n"
+                      "ok\n"),
+            (V{"ok"}));
+  EXPECT_EQ(diags_.NumErrors(), 4u);
+}
+
+TEST_F(DirectiveTest, MalformedMacroParameterListsAreRejectedAndRecovered) {
+  EXPECT_EQ(Spellings("#define MISSING_COMMA(a b) a\n"
+                      "#define DUPLICATE(a, a) a\n"
+                      "#define TRAILING_COMMA(a,) a\n"
+                      "#define AFTER_ELLIPSIS(..., a) a\n"
+                      "#define UNTERMINATED(a, b\n"
+                      "ok\n"),
+            (V{"ok"}));
+
+  EXPECT_EQ(diags_.NumErrors(), 5u);
+  for (std::string_view name : {"MISSING_COMMA", "DUPLICATE", "TRAILING_COMMA",
+                                "AFTER_ELLIPSIS", "UNTERMINATED"}) {
+    const IdentifierInfo& identifier = pp_->GetIdentifierTable().Get(name);
+    EXPECT_FALSE(pp_->IsMacroDefined(&identifier)) << name;
+  }
 }
 
 //===----------------------------------------------------------------------===//
