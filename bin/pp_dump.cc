@@ -352,6 +352,9 @@ int main(int argc, char* argv[]) {
   bcc::TextDiagnosticPrinter printer(std::cerr);
   bcc::DiagnosticsEngine diag(&printer, &sm);
   bcc::HeaderSearch header_search(fm);
+#ifdef BCC_BUILTIN_HEADERS_DIR
+  header_search.AddBuiltinSearchPath(BCC_BUILTIN_HEADERS_DIR);
+#endif
   for (const std::string& dir : opts.include_dirs) {
     header_search.AddAngledSearchPath(dir);
   }

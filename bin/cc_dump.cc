@@ -6,6 +6,9 @@
 //   -fsyntax-only  check only (default mode; accepted for compat)
 //   -ast-dump      print the AST after a successful parse
 //   -emit-ir       lower the AST to bcc IR and print it (LLVM syntax)
+//
+// The compiler's built-in headers (stddef.h, stdarg.h, ...) are always
+// searched before the -I directories.
 
 #include <iostream>
 #include <string>
@@ -52,6 +55,9 @@ int main(int argc, char* argv[]) {
   bcc::TextDiagnosticPrinter printer(std::cerr);
   bcc::DiagnosticsEngine diag(&printer, &sm);
   bcc::HeaderSearch header_search(fm);
+#ifdef BCC_BUILTIN_HEADERS_DIR
+  header_search.AddBuiltinSearchPath(BCC_BUILTIN_HEADERS_DIR);
+#endif
   for (const std::string& dir : include_dirs) {
     header_search.AddAngledSearchPath(dir);
   }

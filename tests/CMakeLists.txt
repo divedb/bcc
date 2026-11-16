@@ -50,6 +50,7 @@ add_executable(bcc_pp_test
 target_link_libraries(bcc_pp_test
   PRIVATE
     bcc_pp
+    bcc_builtin_headers
     GTest::gtest_main
 )
 
@@ -73,6 +74,7 @@ gtest_discover_tests(bcc_pp_test)
 gtest_discover_tests(bcc_as_test)
 
 add_executable(bcc_frontend_test
+  unittest/frontend/builtin_headers_test.cc
   unittest/frontend/codegen_test.cc
   unittest/frontend/parser_test.cc
   unittest/frontend/sema_test.cc
@@ -82,6 +84,7 @@ target_link_libraries(bcc_frontend_test
   PRIVATE
     bcc_parse
     bcc_codegen
+    bcc_builtin_headers
     GTest::gtest_main
 )
 

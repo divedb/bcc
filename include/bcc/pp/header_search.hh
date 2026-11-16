@@ -70,6 +70,21 @@ class HeaderSearch {
     angled_dirs_.push_back(std::move(dir));
   }
 
+  /// \brief Adds a directory holding the compiler's own built-in headers
+  ///        (stddef.h, stdarg.h, ...).
+  ///
+  /// The built-in tier is searched after the quoted tier but before the
+  /// angled (-I) tier, mirroring how the compiler resource directory precedes
+  /// the system directories: the compiler's headers encode its ABI decisions
+  /// (size_t width, the va_list layout) and must be found even when C library
+  /// directories are configured. Code can still override a built-in header
+  /// via the quoted tier (the includer's directory or -iquote).
+  ///
+  /// \param dir The directory to add to the built-in search list.
+  void AddBuiltinSearchPath(std::string dir) {
+    builtin_dirs_.push_back(std::move(dir));
+  }
+
   /// \brief Resolves \p filename to a FileEntry, or nullptr if not found.
   ///
   /// \param filename     The header name, without its <> or "" delimiters.
@@ -176,19 +191,26 @@ class HeaderSearch {
                           std::string_view includer_dir) const
       -> const FileEntry*;
 
+  auto LookupInBuiltinDirs(std::string_view filename) const
+      -> const FileEntry*;
+
   auto LookupInAngledDirs(std::string_view filename) const -> const FileEntry*;
+
+  /// Walks the built-in then angled directories, starting after the
+  /// includer's own entry, for #include_next. An includer in a built-in
+  /// directory therefore continues with the remaining built-in directories
+  /// and then the angled list from the beginning.
+  auto LookupNextInAngledChain(std::string_view filename,
+                               std::string_view includer_dir,
+                               bool is_angled) const -> const FileEntry*;
 
   auto LookupNextInQuotedDirs(std::string_view filename,
                               std::string_view includer_dir) const
       -> const FileEntry*;
 
-  auto LookupNextInAngledDirs(std::string_view filename,
-                              std::string_view includer_dir,
-                              bool is_angled) const
-      -> const FileEntry*;
-
   FileManager& fm_;
   std::vector<std::string> quoted_dirs_;
+  std::vector<std::string> builtin_dirs_;
   std::vector<std::string> angled_dirs_;
   mutable std::unordered_map<const FileEntry*, HeaderFileInfo> file_info_;
 };

@@ -23,6 +23,21 @@ auto HeaderSearch::LookupInQuotedDirs(std::string_view filename,
   return nullptr;
 }
 
+auto HeaderSearch::LookupInBuiltinDirs(std::string_view filename) const
+    -> const FileEntry* {
+  for (const std::string& dir : builtin_dirs_) {
+    if (const FileEntry* fe = fm_.GetFile(JoinPath(dir, filename))) {
+      // Built-in headers are compiler-provided and report the system
+      // characteristic, like files found on the angled search path.
+      file_info_[fe].file_characteristic = CharacteristicKind::kSystem;
+
+      return fe;
+    }
+  }
+
+  return nullptr;
+}
+
 auto HeaderSearch::LookupInAngledDirs(std::string_view filename) const
     -> const FileEntry* {
   for (const std::string& dir : angled_dirs_) {
@@ -50,6 +65,11 @@ const FileEntry* HeaderSearch::LookupFile(std::string_view filename,
     }
   }
 
+  // The built-in tier precedes the angled list (see AddBuiltinSearchPath).
+  if (const FileEntry* fe = LookupInBuiltinDirs(filename)) {
+    return fe;
+  }
+
   return LookupInAngledDirs(filename);
 }
 
@@ -74,20 +94,20 @@ auto HeaderSearch::LookupNextInQuotedDirs(std::string_view filename,
   return nullptr;
 }
 
-auto HeaderSearch::LookupNextInAngledDirs(std::string_view filename,
-                                          std::string_view includer_dir,
-                                          bool is_angled) const
+auto HeaderSearch::LookupNextInAngledChain(std::string_view filename,
+                                           std::string_view includer_dir,
+                                           bool is_angled) const
     -> const FileEntry* {
-  // Walk the angled list, skipping everything up to and including the
-  // includer's own entry. An angled include_next ignores the directories
-  // before it; a quoted include_next (which already scanned the quoted list)
-  // scans the whole angled list but still skips that one entry.
+  // Walk the built-in + angled chain, skipping everything up to and
+  // including the includer's own entry. An angled include_next ignores the
+  // directories before it; a quoted include_next (which already scanned the
+  // quoted list) scans the whole chain but still skips that one entry.
   bool passed_includer = false;
 
-  for (const std::string& dir : angled_dirs_) {
+  auto try_dir = [&](const std::string& dir) -> const FileEntry* {
     if (!passed_includer && dir == includer_dir) {
       passed_includer = true;
-      continue;
+      return nullptr;
     }
 
     if (passed_includer || !is_angled) {
@@ -97,6 +117,16 @@ auto HeaderSearch::LookupNextInAngledDirs(std::string_view filename,
         return fe;
       }
     }
+
+    return nullptr;
+  };
+
+  for (const std::string& dir : builtin_dirs_) {
+    if (const FileEntry* fe = try_dir(dir)) return fe;
+  }
+
+  for (const std::string& dir : angled_dirs_) {
+    if (const FileEntry* fe = try_dir(dir)) return fe;
   }
 
   return nullptr;
@@ -113,7 +143,7 @@ const FileEntry* HeaderSearch::LookupFileNext(std::string_view filename,
     }
   }
 
-  return LookupNextInAngledDirs(filename, includer_dir, is_angled);
+  return LookupNextInAngledChain(filename, includer_dir, is_angled);
 }
 
 }  // namespace bcc

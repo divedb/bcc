@@ -29,14 +29,24 @@ class IncludeTest : public ::testing::Test {
         ::testing::UnitTest::GetInstance()->current_test_info();
     dir_ = fs::temp_directory_path() /
            (std::string("bcc_include_") + info->name());
+    builtin_dir_ = fs::path(dir_.string() + "_builtin");
     std::error_code ec;
     fs::remove_all(dir_, ec);
+    fs::remove_all(builtin_dir_, ec);
     fs::create_directories(dir_);
+    fs::create_directories(builtin_dir_);
 
     fm_ = std::make_unique<FileManager>(FileSystemOptions{dir_.string()});
     sm_ = std::make_unique<SourceManager>(*fm_);
     diags_ = std::make_unique<DiagnosticsEngine>(nullptr, sm_.get());
     hs_ = std::make_unique<HeaderSearch>(*fm_);
+    // The built-in tier precedes the angled tier (see AddBuiltinSearchPath);
+    // both resolve against per-test temp directories.
+    hs_->AddBuiltinSearchPath(builtin_dir_.string());
+#ifdef BCC_BUILTIN_HEADERS_DIR
+    // The compiler's real built-in headers follow the synthetic ones.
+    hs_->AddBuiltinSearchPath(BCC_BUILTIN_HEADERS_DIR);
+#endif
     // Angled includes resolve against the temp directory.
     hs_->AddAngledSearchPath(dir_.string());
   }
@@ -44,10 +54,17 @@ class IncludeTest : public ::testing::Test {
   void TearDown() override {
     std::error_code ec;
     fs::remove_all(dir_, ec);
+    fs::remove_all(builtin_dir_, ec);
   }
 
   void WriteFile(std::string_view name, std::string_view content) {
     std::ofstream out(dir_ / name);
+    out << content;
+  }
+
+  // Writes a header into the built-in tier directory.
+  void WriteBuiltinFile(std::string_view name, std::string_view content) {
+    std::ofstream out(builtin_dir_ / name);
     out << content;
   }
 
@@ -79,6 +96,7 @@ class IncludeTest : public ::testing::Test {
   }
 
   fs::path dir_;
+  fs::path builtin_dir_;
   std::unique_ptr<FileManager> fm_;
   std::unique_ptr<SourceManager> sm_;
   std::unique_ptr<DiagnosticsEngine> diags_;
@@ -316,6 +334,103 @@ TEST_F(IncludeTest, PragmaSystemHeaderPromotesCurrentFile) {
   EXPECT_EQ(hs_->GetFileCharacteristic(fe), CharacteristicKind::kSystem);
   EXPECT_FALSE(diags_->HasErrors());
 }
+
+// The built-in tier is searched before the angled (-I) directories: a header
+// found there wins over a same-named file on the angled path.
+TEST_F(IncludeTest, BuiltinTierPrecedesAngledDirs) {
+  WriteBuiltinFile("stddef_like.h", "int builtin;\n");
+  WriteFile("stddef_like.h", "int angled;\n");
+  SetMainFile("main.c", "#include <stddef_like.h>\n");
+
+  auto pp = MakePP();
+  EXPECT_EQ(LexSpellings(*pp), (std::vector<std::string>{"int", "builtin", ";"}));
+  EXPECT_FALSE(diags_->HasErrors());
+}
+
+// The quoted tier (includer-relative lookup) still overrides the built-in
+// tier, so user code can deliberately shadow a built-in header.
+TEST_F(IncludeTest, QuotedIncludeOverridesBuiltinTier) {
+  WriteBuiltinFile("stddef_like.h", "int builtin;\n");
+  WriteFile("stddef_like.h", "int local;\n");
+  SetMainFile("main.c", "#include \"stddef_like.h\"\n");
+
+  auto pp = MakePP();
+  EXPECT_EQ(LexSpellings(*pp), (std::vector<std::string>{"int", "local", ";"}));
+  EXPECT_FALSE(diags_->HasErrors());
+}
+
+// A header found in the built-in tier reports the system characteristic,
+// like one found on the angled path.
+TEST_F(IncludeTest, BuiltinHeaderHasSystemCharacteristic) {
+  WriteBuiltinFile("stddef_like.h", "int builtin;\n");
+  SetMainFile("main.c", "#include <stddef_like.h>\n");
+
+  auto pp = MakePP();
+  EXPECT_EQ(LexSpellings(*pp), (std::vector<std::string>{"int", "builtin", ";"}));
+
+  const FileEntry* fe = fm_->GetFile((builtin_dir_ / "stddef_like.h").string());
+  ASSERT_NE(fe, nullptr);
+  EXPECT_EQ(hs_->GetFileCharacteristic(fe), CharacteristicKind::kSystem);
+}
+
+// #include_next from a built-in header resumes with the angled directories,
+// mirroring how the compiler resource directory precedes system directories.
+TEST_F(IncludeTest, IncludeNextFromBuiltinContinuesIntoAngled) {
+  WriteBuiltinFile("chain.h", "from_builtin\n#include_next <chain.h>\n");
+  WriteFile("chain.h", "from_angled\n");
+  SetMainFile("main.c", "#include <chain.h>\n");
+
+  auto pp = MakePP();
+  EXPECT_EQ(LexSpellings(*pp),
+            (std::vector<std::string>{"from_builtin", "from_angled"}));
+  EXPECT_FALSE(diags_->HasErrors());
+}
+
+// A built-in header without an #include_next still resolves normally when the
+// same name also exists in a later tier.
+TEST_F(IncludeTest, AngledHeaderReachableWhenNotShadowed) {
+  WriteBuiltinFile("only_builtin.h", "b\n");
+  WriteFile("only_angled.h", "a\n");
+  SetMainFile("main.c", "#include <only_angled.h>\n");
+
+  auto pp = MakePP();
+  EXPECT_EQ(LexSpellings(*pp), (std::vector<std::string>{"a"}));
+  EXPECT_FALSE(diags_->HasErrors());
+}
+
+#ifdef BCC_BUILTIN_HEADERS_DIR
+
+// The compiler's real built-in headers resolve from the configured built-in
+// directory, enter cleanly, and record the system characteristic.
+TEST_F(IncludeTest, RealBuiltinHeadersResolve) {
+  SetMainFile("main.c", "#include <stddef.h>\nint ok;\n");
+
+  auto pp = MakePP();
+  LexSpellings(*pp);  // drain
+  EXPECT_FALSE(diags_->HasErrors());
+
+  const FileEntry* fe =
+      fm_->GetFile(std::string(BCC_BUILTIN_HEADERS_DIR) + "/stddef.h");
+  ASSERT_NE(fe, nullptr);
+  EXPECT_EQ(hs_->GetFileCharacteristic(fe), CharacteristicKind::kSystem);
+}
+
+// Partial (__need_) mode of <stddef.h>: only the requested definition's
+// tokens are produced, and the request macro is consumed (#undef'd).
+TEST_F(IncludeTest, RealBuiltinStddefNeedProtocol) {
+  SetMainFile("main.c",
+              "#define __need_size_t\n"
+              "#include <stddef.h>\n"
+              "int ok;\n");
+
+  auto pp = MakePP();
+  EXPECT_EQ(LexSpellings(*pp),
+            (std::vector<std::string>{"typedef", "unsigned", "long", "size_t",
+                                      ";", "int", "ok", ";"}));
+  EXPECT_FALSE(diags_->HasErrors());
+}
+
+#endif  // BCC_BUILTIN_HEADERS_DIR
 
 }  // namespace
 }  // namespace bcc

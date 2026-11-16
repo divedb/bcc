@@ -46,6 +46,9 @@ class FrontendTest : public ::testing::Test {
     diags_ = std::make_unique<DiagnosticsEngine>(consumer_.get(), sm_.get());
     sm_->SetMainFileID(sm_->CreateFileID("test.c", std::string(code)));
     header_search_ = std::make_unique<HeaderSearch>(*fm_);
+#ifdef BCC_BUILTIN_HEADERS_DIR
+    header_search_->AddBuiltinSearchPath(BCC_BUILTIN_HEADERS_DIR);
+#endif
     pp_ = std::make_unique<Preprocessor>(*sm_, *diags_, *header_search_);
     pp_->EnterMainFile();
     ctx_ = std::make_unique<ASTContext>();
